@@ -1,3 +1,21 @@
-build
-.build
-.claude
+# Swift / SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+*.xcodeproj
+
+# Build output
+build/
+*.app
+*.dmg
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Claude Code session data
+.claude/

@@ -5,10 +5,65 @@ import AppKit
 struct ScrapedUsage: Sendable {
     var sessionPct: Double?
     var weeklyPct: Double?
-    var sessionResetText: String?
-    var weeklyResetText: String?
+    var sessionResetText: String?       // e.g. "57 min" (raw)
+    var weeklyResetText: String?        // e.g. "Tue 4:59 AM" (raw)
+    var sessionResetTime: Date?         // parsed absolute time
+    var weeklyResetTime: Date?          // parsed absolute time
     var fetchedAt: Date = Date()
     var isStale: Bool { Date().timeIntervalSince(fetchedAt) > 600 }
+
+    var sessionAtLimit: Bool { (sessionPct ?? 0) >= 99.99 }
+    var weeklyAtLimit: Bool { (weeklyPct ?? 0) >= 99.99 }
+    var atLimit: Bool { sessionAtLimit || weeklyAtLimit }
+}
+
+// MARK: - Reset Time Parsers
+enum ResetTimeParser {
+    /// Parse "57 min", "1h 23m", "1 hour 23 minutes", "1h" into a future Date
+    static func parseSessionReset(_ text: String, relativeTo: Date) -> Date? {
+        var total: TimeInterval = 0
+
+        let hRegex  = try? NSRegularExpression(pattern: #"(\d+)\s*h"#, options: .caseInsensitive)
+        let mRegex  = try? NSRegularExpression(pattern: #"(\d+)\s*m"#, options: .caseInsensitive)
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+
+        if let m = hRegex?.firstMatch(in: text, range: range), m.numberOfRanges >= 2 {
+            if let v = Int(ns.substring(with: m.range(at: 1))) { total += TimeInterval(v * 3600) }
+        }
+        if let m = mRegex?.firstMatch(in: text, range: range), m.numberOfRanges >= 2 {
+            if let v = Int(ns.substring(with: m.range(at: 1))) { total += TimeInterval(v * 60) }
+        }
+        return total > 0 ? relativeTo.addingTimeInterval(total) : nil
+    }
+
+    /// Parse "Tue 4:59 AM" or "Mon 12:00 PM" → next occurrence of that weekday/time
+    static func parseWeeklyReset(_ text: String, relativeTo: Date) -> Date? {
+        let pattern = #"(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2}):(\d{2})\s*(AM|PM)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let ns = text as NSString
+        guard let m = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
+              m.numberOfRanges >= 5 else { return nil }
+
+        let dayStr = ns.substring(with: m.range(at: 1)).lowercased()
+        let hour = Int(ns.substring(with: m.range(at: 2))) ?? 0
+        let mins = Int(ns.substring(with: m.range(at: 3))) ?? 0
+        let ampm = ns.substring(with: m.range(at: 4)).lowercased()
+
+        let dayMap = ["sun": 1, "mon": 2, "tue": 3, "wed": 4, "thu": 5, "fri": 6, "sat": 7]
+        guard let weekday = dayMap[dayStr] else { return nil }
+
+        var hour24 = hour
+        if ampm == "pm" && hour < 12 { hour24 += 12 }
+        if ampm == "am" && hour == 12 { hour24 = 0 }
+
+        var comp = DateComponents()
+        comp.weekday = weekday
+        comp.hour = hour24
+        comp.minute = mins
+        comp.second = 0
+        return Calendar.current.nextDate(after: relativeTo, matching: comp, matchingPolicy: .nextTime)
+    }
 }
 
 // MARK: - Login Window Controller
@@ -174,11 +229,17 @@ final class ClaudeAIScraper: NSObject, WKNavigationDelegate {
                     self?.pollForData(attemptsLeft: attemptsLeft - 1)
                     return
                 }
+                let now = Date()
+                let sessionText = obj["sessionReset"] as? String
+                let weeklyText = obj["weeklyReset"] as? String
                 let scraped = ScrapedUsage(
                     sessionPct: (obj["sessionPct"] as? NSNumber)?.doubleValue,
                     weeklyPct: (obj["weeklyPct"] as? NSNumber)?.doubleValue,
-                    sessionResetText: obj["sessionReset"] as? String,
-                    weeklyResetText: obj["weeklyReset"] as? String
+                    sessionResetText: sessionText,
+                    weeklyResetText: weeklyText,
+                    sessionResetTime: sessionText.flatMap { ResetTimeParser.parseSessionReset($0, relativeTo: now) },
+                    weeklyResetTime: weeklyText.flatMap { ResetTimeParser.parseWeeklyReset($0, relativeTo: now) },
+                    fetchedAt: now
                 )
                 if scraped.sessionPct != nil || scraped.weeklyPct != nil {
                     Task { @MainActor in self?.finishWithSuccess(scraped) }

@@ -143,6 +143,12 @@ struct UsageBarsSection: View {
     }
 
     // MARK: - Session
+    private var sessionAtLimit: Bool {
+        if usingScraped { return store.scrapedUsage?.sessionAtLimit == true }
+        guard let block = store.data.currentBlock, block.isActive else { return false }
+        return Double(block.tokens) / Double(effectiveSessionLimit) >= 0.9999
+    }
+
     private var sessionFraction: Double {
         if usingScraped, let pct = store.scrapedUsage?.sessionPct {
             return min(pct / 100.0, 1.0)
@@ -157,6 +163,10 @@ struct UsageBarsSection: View {
     }
 
     private var sessionUsedText: String {
+        // When at limit, show countdown instead of percentage
+        if sessionAtLimit {
+            return store.currentSessionDisplay()
+        }
         if usingScraped, let pct = store.scrapedUsage?.sessionPct {
             return String(format: "%.1f%%", pct)
         }
@@ -164,6 +174,7 @@ struct UsageBarsSection: View {
     }
 
     private var sessionLimitText: String {
+        if sessionAtLimit { return "LIMIT REACHED" }
         if usingScraped { return "100%" }
         return store.formatTokens(effectiveSessionLimit) + " tokens"
     }
@@ -180,6 +191,11 @@ struct UsageBarsSection: View {
     }
 
     // MARK: - Weekly
+    private var weeklyAtLimit: Bool {
+        if usingScraped { return store.scrapedUsage?.weeklyAtLimit == true }
+        return Double(store.data.weeklyBlock.tokens) / Double(effectiveWeeklyLimit) >= 0.9999
+    }
+
     private var weeklyFraction: Double {
         if usingScraped, let pct = store.scrapedUsage?.weeklyPct {
             return min(pct / 100.0, 1.0)
@@ -188,6 +204,9 @@ struct UsageBarsSection: View {
     }
 
     private var weeklyUsedText: String {
+        if weeklyAtLimit {
+            return store.currentWeeklyDisplay()
+        }
         if usingScraped, let pct = store.scrapedUsage?.weeklyPct {
             return String(format: "%.1f%%", pct)
         }
@@ -195,6 +214,7 @@ struct UsageBarsSection: View {
     }
 
     private var weeklyLimitText: String {
+        if weeklyAtLimit { return "LIMIT REACHED" }
         if usingScraped { return "100%" }
         return store.formatTokens(effectiveWeeklyLimit) + " tokens"
     }

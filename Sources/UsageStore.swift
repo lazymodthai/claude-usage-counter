@@ -31,6 +31,7 @@ final class UsageStore: ObservableObject {
     private var periodicTimer: Timer?
     private var scraper: ClaudeAIScraper?
     private var scrapeTimer: Timer?
+    private var countdownTimer: Timer?
 
     @Published var scrapedUsage: ScrapedUsage?
     @Published var isLoggedIn: Bool = false
@@ -98,11 +99,7 @@ final class UsageStore: ObservableObject {
     // MARK: - claude.ai scraping
     func startScraping() {
         runScrape()
-        scrapeTimer?.invalidate()
-        // Refresh from claude.ai every 60s (page is rate-limited / heavy)
-        scrapeTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.runScrape() }
-        }
+        scheduleNextScrape()
     }
 
     func stopScraping() {
@@ -111,16 +108,95 @@ final class UsageStore: ObservableObject {
         scraper = nil
     }
 
+    private func scheduleNextScrape() {
+        scrapeTimer?.invalidate()
+        // If at limit, don't scrape — countdown timer handles UI updates locally
+        if isInCountdownMode { return }
+        scrapeTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.runScrape()
+                self?.scheduleNextScrape()
+            }
+        }
+    }
+
     func runScrape() {
+        // Skip if in countdown mode (saves CPU + bandwidth)
+        if isInCountdownMode {
+            updateStatusBar()
+            return
+        }
         let s = ClaudeAIScraper()
         scraper = s
         s.scrape { [weak self] result in
             Task { @MainActor in
-                if let r = result { self?.scrapedUsage = r }
+                if let r = result {
+                    self?.scrapedUsage = r
+                    self?.evaluateCountdownMode()
+                }
                 self?.updateStatusBar()
                 self?.scraper = nil
             }
         }
+    }
+
+    // MARK: - Countdown Mode
+    var isInCountdownMode: Bool {
+        guard let s = scrapedUsage, !s.isStale else { return false }
+        if s.sessionAtLimit, let r = s.sessionResetTime, r > Date() { return true }
+        if s.weeklyAtLimit,  let r = s.weeklyResetTime,  r > Date() { return true }
+        return false
+    }
+
+    private func evaluateCountdownMode() {
+        if isInCountdownMode {
+            startCountdownTicks()
+        } else {
+            stopCountdownTicks()
+        }
+    }
+
+    private func startCountdownTicks() {
+        countdownTimer?.invalidate()
+        // 1-second tick when ≤ 60s remaining (for second-by-second display),
+        // otherwise 60s tick (minute-by-minute display)
+        let interval = nearestResetWithinSeconds(60) ? 1.0 : 60.0
+        countdownTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.countdownTick() }
+        }
+    }
+
+    private func stopCountdownTicks() {
+        countdownTimer?.invalidate()
+        countdownTimer = nil
+    }
+
+    private func countdownTick() {
+        // Refresh status bar
+        updateStatusBar()
+        // Notify observers (popup re-renders)
+        objectWillChange.send()
+
+        // If reset reached, exit countdown mode and resume scraping
+        if !isInCountdownMode {
+            stopCountdownTicks()
+            scrapedUsage = nil   // force a fresh scrape
+            if useClaudeAISource { startScraping() }
+            return
+        }
+
+        // Adjust tick frequency when crossing the 60s boundary
+        let needFastTick = nearestResetWithinSeconds(60)
+        let isFastTick   = (countdownTimer?.timeInterval ?? 60) <= 1.5
+        if needFastTick != isFastTick {
+            startCountdownTicks()
+        }
+    }
+
+    private func nearestResetWithinSeconds(_ seconds: TimeInterval) -> Bool {
+        guard let s = scrapedUsage else { return false }
+        let candidates = [s.sessionResetTime, s.weeklyResetTime].compactMap { $0 }
+        return candidates.contains { $0.timeIntervalSinceNow <= seconds && $0.timeIntervalSinceNow > 0 }
     }
 
     func openClaudeAILogin() {
@@ -179,24 +255,72 @@ final class UsageStore: ObservableObject {
             button.image = img
         }
 
-        // Prefer scraped values from claude.ai if available
-        if useClaudeAISource, let s = scrapedUsage, !s.isStale,
-           let sp = s.sessionPct, let wp = s.weeklyPct {
-            button.title = String(format: " %.2f%% | %.2f%%", sp, wp)
-            return
-        }
+        let sessionDisplay = currentSessionDisplay()
+        let weeklyDisplay  = currentWeeklyDisplay()
+        button.title = " \(sessionDisplay) | \(weeklyDisplay)"
+    }
 
+    // MARK: - Display formatters (used by both menu bar and popup)
+    func currentSessionDisplay() -> String {
+        if useClaudeAISource, let s = scrapedUsage, !s.isStale {
+            if s.sessionAtLimit, let reset = s.sessionResetTime {
+                return formatSessionCountdown(reset.timeIntervalSinceNow)
+            }
+            if let pct = s.sessionPct {
+                return String(format: "%.2f%%", pct)
+            }
+        }
+        // Local fallback
         let sessionLimit = sessionTokenLimit > 0 ? sessionTokenLimit : max(1, data.detectedSessionLimit)
-        let weekLimit   = weeklyTokenLimit  > 0 ? weeklyTokenLimit  : max(1, data.detectedWeeklyLimit)
-
-        let sessionPct: Double
         if let block = data.currentBlock, block.isActive {
-            sessionPct = min(Double(block.tokens) / Double(sessionLimit), 1.0) * 100
-        } else {
-            sessionPct = 0
+            let frac = Double(block.tokens) / Double(sessionLimit)
+            if frac >= 0.9999 {
+                return formatSessionCountdown(block.timeUntilReset)
+            }
+            return String(format: "%.2f%%", min(frac, 1.0) * 100)
         }
-        let weeklyPct = min(Double(data.weeklyBlock.tokens) / Double(weekLimit), 1.0) * 100
-        button.title = String(format: " %.2f%% | %.2f%%", sessionPct, weeklyPct)
+        return "0.00%"
+    }
+
+    func currentWeeklyDisplay() -> String {
+        if useClaudeAISource, let s = scrapedUsage, !s.isStale {
+            if s.weeklyAtLimit, let reset = s.weeklyResetTime {
+                return formatWeeklyCountdown(reset.timeIntervalSinceNow)
+            }
+            if let pct = s.weeklyPct {
+                return String(format: "%.2f%%", pct)
+            }
+        }
+        let weekLimit = weeklyTokenLimit > 0 ? weeklyTokenLimit : max(1, data.detectedWeeklyLimit)
+        let frac = Double(data.weeklyBlock.tokens) / Double(weekLimit)
+        if frac >= 0.9999 {
+            return formatWeeklyCountdown(data.weeklyBlock.timeUntilReset)
+        }
+        return String(format: "%.2f%%", min(frac, 1.0) * 100)
+    }
+
+    /// Session reset (max 5h). Shown as ">4h", "<4h", "<3h", "<2h", "59m"…"1m", "59s"…"0s"
+    func formatSessionCountdown(_ secs: TimeInterval) -> String {
+        let s = max(0, Int(secs))
+        if s < 60 { return "\(s)s" }
+        let m = s / 60
+        let h = m / 60
+        if h >= 4 { return ">4h" }
+        if h >= 3 { return "<4h" }
+        if h >= 2 { return "<3h" }
+        if h >= 1 { return "<2h" }
+        return "\(m)m"
+    }
+
+    /// Weekly reset. If > 1 day: "1d 22h", "4d 22h". Otherwise same as session.
+    func formatWeeklyCountdown(_ secs: TimeInterval) -> String {
+        let s = max(0, Int(secs))
+        let d = s / 86400
+        if d >= 1 {
+            let h = (s % 86400) / 3600
+            return "\(d)d \(h)h"
+        }
+        return formatSessionCountdown(secs)
     }
 
 }

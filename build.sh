@@ -7,24 +7,45 @@ BUNDLE_ID="com.lazymodthai.claude-usage-counter"
 VERSION="1.0.0"
 BUILD_DIR="build"
 APP_PATH="${BUILD_DIR}/${APP_NAME}.app"
+ICON_SRC="icon.png"
 
-echo "🔨 Building ${APP_NAME}..."
+echo "🔨 Building ${APP_NAME} v${VERSION}..."
 
-# Build release binary
+# Build universal binary (Apple Silicon + Intel)
 swift build -c release --arch arm64 --arch x86_64 2>&1
 
 echo "📦 Creating .app bundle..."
-
-# Clean and create bundle structure
 rm -rf "${APP_PATH}"
 mkdir -p "${APP_PATH}/Contents/MacOS"
 mkdir -p "${APP_PATH}/Contents/Resources"
 
-# Copy universal binary
+# Copy binary
 cp ".build/apple/Products/Release/${BINARY_NAME}" "${APP_PATH}/Contents/MacOS/${APP_NAME}" 2>/dev/null || \
 cp ".build/release/${BINARY_NAME}" "${APP_PATH}/Contents/MacOS/${APP_NAME}"
-
 chmod +x "${APP_PATH}/Contents/MacOS/${APP_NAME}"
+
+# Build .icns from icon.png
+if [ -f "${ICON_SRC}" ]; then
+    echo "🎨 Generating AppIcon.icns from ${ICON_SRC}..."
+    ICONSET="${BUILD_DIR}/AppIcon.iconset"
+    rm -rf "${ICONSET}"
+    mkdir -p "${ICONSET}"
+
+    # Required sizes for a complete .icns
+    sips -z 16 16     "${ICON_SRC}" --out "${ICONSET}/icon_16x16.png"      >/dev/null
+    sips -z 32 32     "${ICON_SRC}" --out "${ICONSET}/icon_16x16@2x.png"   >/dev/null
+    sips -z 32 32     "${ICON_SRC}" --out "${ICONSET}/icon_32x32.png"      >/dev/null
+    sips -z 64 64     "${ICON_SRC}" --out "${ICONSET}/icon_32x32@2x.png"   >/dev/null
+    sips -z 128 128   "${ICON_SRC}" --out "${ICONSET}/icon_128x128.png"    >/dev/null
+    sips -z 256 256   "${ICON_SRC}" --out "${ICONSET}/icon_128x128@2x.png" >/dev/null
+    sips -z 256 256   "${ICON_SRC}" --out "${ICONSET}/icon_256x256.png"    >/dev/null
+    sips -z 512 512   "${ICON_SRC}" --out "${ICONSET}/icon_256x256@2x.png" >/dev/null
+    sips -z 512 512   "${ICON_SRC}" --out "${ICONSET}/icon_512x512.png"    >/dev/null
+    sips -z 1024 1024 "${ICON_SRC}" --out "${ICONSET}/icon_512x512@2x.png" >/dev/null
+
+    iconutil -c icns "${ICONSET}" -o "${APP_PATH}/Contents/Resources/AppIcon.icns"
+    rm -rf "${ICONSET}"
+fi
 
 # Write Info.plist
 cat > "${APP_PATH}/Contents/Info.plist" << PLIST
@@ -44,6 +65,8 @@ cat > "${APP_PATH}/Contents/Info.plist" << PLIST
     <string>${VERSION}</string>
     <key>CFBundleExecutable</key>
     <string>${APP_NAME}</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
@@ -60,11 +83,16 @@ cat > "${APP_PATH}/Contents/Info.plist" << PLIST
 </plist>
 PLIST
 
-# Write PkgInfo
 printf "APPL????" > "${APP_PATH}/Contents/PkgInfo"
+
+# Ad-hoc sign so macOS Gatekeeper treats it as a proper bundle
+codesign --force --deep --sign - "${APP_PATH}" 2>/dev/null || true
+
+# Refresh Finder/Dock icon cache so new icon shows up immediately
+touch "${APP_PATH}"
 
 echo ""
 echo "✅ Built: ${APP_PATH}"
 echo ""
-echo "To install: cp -r \"${APP_PATH}\" /Applications/"
-echo "To run now: open \"${APP_PATH}\""
+echo "Install:   ./install.sh"
+echo "Make DMG:  ./release.sh"
