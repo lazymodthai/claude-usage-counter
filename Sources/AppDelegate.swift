@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        setupEditMenu()
 
         store = UsageStore()
 
@@ -44,6 +45,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start FSEvents watcher + initial load
         store.startWatching()
         store.refresh()
+    }
+
+    // Accessory apps have no menu bar, so standard text shortcuts (Cmd+V/C/X/A) are
+    // unwired. Installing an Edit menu routes those key equivalents to the first responder.
+    private func setupEditMenu() {
+        let mainMenu = NSMenu()
+        let editItem = NSMenuItem()
+        mainMenu.addItem(editItem)
+
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = editMenu
+
+        NSApp.mainMenu = mainMenu
     }
 
     @objc private func togglePopover() {

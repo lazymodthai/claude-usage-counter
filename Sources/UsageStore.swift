@@ -21,11 +21,6 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    // Selected model (mirrors ~/.claude/settings.json)
-    @Published var selectedModel: String {
-        didSet { UserDefaults.standard.set(selectedModel, forKey: "selectedModel") }
-    }
-
     weak var statusItem: NSStatusItem?
     private var watcher: FileWatcher?
     private var periodicTimer: Timer?
@@ -35,6 +30,8 @@ final class UsageStore: ObservableObject {
 
     @Published var scrapedUsage: ScrapedUsage?
     @Published var isLoggedIn: Bool = false
+    @Published var importStatus: String?
+    @Published var isImporting: Bool = false
     @Published var useClaudeAISource: Bool = UserDefaults.standard.bool(forKey: "useClaudeAISource") {
         didSet {
             UserDefaults.standard.set(useClaudeAISource, forKey: "useClaudeAISource")
@@ -45,6 +42,27 @@ final class UsageStore: ObservableObject {
     func refreshLoginStatus() {
         Task { @MainActor in
             self.isLoggedIn = await ClaudeAIAuth.checkLoggedIn()
+        }
+    }
+
+    /// Apply a sessionKey pasted from Chrome (DevTools → Application → Cookies → claude.ai).
+    func applyManualSession(_ raw: String) {
+        guard !isImporting else { return }
+        let key = raw.trimmingCharacters(in: CharacterSet(charactersIn: " \t\n\r\"'"))
+        guard !key.isEmpty else { importStatus = "Paste a sessionKey first"; return }
+
+        isImporting = true
+        importStatus = "Applying session…"
+        Task { @MainActor in
+            let ok = await ClaudeAIAuth.setSessionKey(key)
+            self.isLoggedIn = ok
+            if ok {
+                self.importStatus = "Session applied ✓"
+                self.useClaudeAISource = true   // triggers a fresh scrape
+            } else {
+                self.importStatus = "Invalid sessionKey"
+            }
+            self.isImporting = false
         }
     }
 
@@ -75,7 +93,6 @@ final class UsageStore: ObservableObject {
             ? ud.integer(forKey: "weeklyTokenLimit")  : 0
         refreshInterval   = ud.object(forKey: "refreshInterval")   != nil
             ? ud.double(forKey: "refreshInterval")    : 30.0
-        selectedModel     = ud.string(forKey: "selectedModel") ?? "sonnet"
     }
 
     // Reschedule periodic timer when interval changes
@@ -225,28 +242,6 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    // MARK: - Model switching
-    func setModel(_ key: String, fullId: String) {
-        selectedModel = key
-        writeModelToClaudeSettings(fullId)
-    }
-
-    private func writeModelToClaudeSettings(_ modelId: String) {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/settings.json")
-
-        var dict: [String: Any] = [:]
-        if let existing = try? Data(contentsOf: path),
-           let parsed = try? JSONSerialization.jsonObject(with: existing) as? [String: Any] {
-            dict = parsed
-        }
-        dict["model"] = modelId
-
-        guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]),
-              let pretty = String(data: data, encoding: .utf8) else { return }
-        try? pretty.write(to: path, atomically: true, encoding: .utf8)
-    }
-
     // MARK: - Status bar
     func updateStatusBar() {
         guard let button = statusItem?.button else { return }
@@ -284,8 +279,9 @@ final class UsageStore: ObservableObject {
 
     func currentWeeklyDisplay() -> String {
         if useClaudeAISource, let s = scrapedUsage, !s.isStale {
-            if s.weeklyAtLimit, let reset = s.weeklyResetTime {
-                return formatWeeklyCountdown(reset.timeIntervalSinceNow)
+            if s.weeklyAtLimit {
+                if let reset = s.weeklyResetTime { return formatResetClock(reset) }
+                if let text = s.weeklyResetText, !text.isEmpty { return text }
             }
             if let pct = s.weeklyPct {
                 return String(format: "%.2f%%", pct)
@@ -294,9 +290,20 @@ final class UsageStore: ObservableObject {
         let weekLimit = weeklyTokenLimit > 0 ? weeklyTokenLimit : max(1, data.detectedWeeklyLimit)
         let frac = Double(data.weeklyBlock.tokens) / Double(weekLimit)
         if frac >= 0.9999 {
-            return formatWeeklyCountdown(data.weeklyBlock.timeUntilReset)
+            let reset = Date().addingTimeInterval(data.weeklyBlock.timeUntilReset)
+            return formatResetClock(reset)
         }
         return String(format: "%.2f%%", min(frac, 1.0) * 100)
+    }
+
+    /// Absolute weekly reset, e.g. "Tue 5:00AM" — matches claude.ai/settings/usage.
+    func formatResetClock(_ date: Date) -> String {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US")
+        df.dateFormat = "EEE h:mma"
+        df.amSymbol = "AM"
+        df.pmSymbol = "PM"
+        return df.string(from: date)
     }
 
     /// Session reset (max 5h). Shown as ">4h", "<4h", "<3h", "<2h", "59m"…"1m", "59s"…"0s"

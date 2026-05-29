@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import AppKit
 
 // MARK: - Theme
 extension Color {
@@ -13,15 +14,6 @@ extension Color {
     static let haikuGreen = Color(red: 0.19, green: 0.82, blue: 0.35)
 }
 
-func modelColor(_ key: String) -> Color {
-    switch key {
-    case "opus":   return .opusBlue
-    case "sonnet": return .sonnetCyan
-    case "haiku":  return .haikuGreen
-    default:       return .white.opacity(0.4)
-    }
-}
-
 // MARK: - Root
 struct ContentView: View {
     @EnvironmentObject var store: UsageStore
@@ -33,8 +25,6 @@ struct ContentView: View {
                 HeaderRow()
                 Rectangle().fill(Color.divider).frame(height: 1)
                 UsageBarsSection()
-                Rectangle().fill(Color.divider).frame(height: 1)
-                ModelSelectorRow()
             }
         }
         .frame(width: 320)
@@ -204,12 +194,10 @@ struct UsageBarsSection: View {
     }
 
     private var weeklyUsedText: String {
-        if weeklyAtLimit {
-            return store.currentWeeklyDisplay()
-        }
         if usingScraped, let pct = store.scrapedUsage?.weeklyPct {
             return String(format: "%.1f%%", pct)
         }
+        if weeklyAtLimit { return "100.0%" }
         return store.formatTokens(store.data.weeklyBlock.tokens)
     }
 
@@ -220,10 +208,14 @@ struct UsageBarsSection: View {
     }
 
     private var weeklyResetLabel: String {
-        if usingScraped, let text = store.scrapedUsage?.weeklyResetText {
+        if usingScraped, let reset = store.scrapedUsage?.weeklyResetTime {
+            return "Resets \(store.formatResetClock(reset))"
+        }
+        if usingScraped, let text = store.scrapedUsage?.weeklyResetText, !text.isEmpty {
             return "Resets \(text)"
         }
-        return "Resets in \(store.formatDuration(store.data.weeklyBlock.timeUntilReset))"
+        let reset = Date().addingTimeInterval(store.data.weeklyBlock.timeUntilReset)
+        return "Resets \(store.formatResetClock(reset))"
     }
 }
 
@@ -302,77 +294,6 @@ struct UsageBarRow: View {
     }
 }
 
-// MARK: - Model Selector
-struct ModelSelectorRow: View {
-    @EnvironmentObject var store: UsageStore
-
-    private let models: [(key: String, label: String, full: String)] = [
-        ("opus",   "Opus",   "claude-opus-4-7"),
-        ("sonnet", "Sonnet", "claude-sonnet-4-6"),
-        ("haiku",  "Haiku",  "claude-haiku-4-5-20251001"),
-    ]
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Image(systemName: "cpu")
-                .font(.system(size: 10))
-                .foregroundStyle(Color.white.opacity(0.4))
-                .padding(.leading, 14)
-                .padding(.trailing, 6)
-
-            Text("Model:")
-                .font(.system(size: 10))
-                .foregroundStyle(Color.white.opacity(0.4))
-                .padding(.trailing, 8)
-
-            HStack(spacing: 4) {
-                ForEach(models, id: \.key) { m in
-                    ModelChip(
-                        label: m.label,
-                        key: m.key,
-                        isSelected: store.selectedModel == m.key
-                    ) {
-                        store.setModel(m.key, fullId: m.full)
-                    }
-                }
-            }
-            Spacer()
-        }
-        .padding(.vertical, 10)
-    }
-}
-
-struct ModelChip: View {
-    let label: String
-    let key: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    private var color: Color { modelColor(key) }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(isSelected ? color : color.opacity(0.3))
-                    .frame(width: 5, height: 5)
-                Text(label)
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? color : Color.white.opacity(0.4))
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(isSelected ? color.opacity(0.12) : Color.clear)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(isSelected ? color.opacity(0.4) : Color.white.opacity(0.1), lineWidth: 1)
-            )
-            .cornerRadius(6)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - Login Status Badge
 struct LoginStatusBadge: View {
     let isLoggedIn: Bool
@@ -402,6 +323,7 @@ struct SettingsView: View {
     @State private var sessionLimitText = ""
     @State private var weeklyLimitText = ""
     @State private var intervalText = ""
+    @State private var sessionKeyInput = ""
 
     private let proSessionLimit  = 8_800_000
     private let proWeeklyLimit   = 88_000_000
@@ -488,6 +410,66 @@ struct SettingsView: View {
                                         .cornerRadius(6)
                                     }
                                     .buttonStyle(.plain)
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("วาง sessionKey จาก Chrome — DevTools (⌥⌘I) → Application → Cookies → claude.ai → คัดลอกค่า sessionKey")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(Color.white.opacity(0.4))
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                TextField("sk-ant-sid01-…", text: $sessionKeyInput)
+                                    .textFieldStyle(.plain)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.white)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                    .padding(.horizontal, 8).padding(.vertical, 6)
+                                    .background(Color.cardBg)
+                                    .cornerRadius(6)
+
+                                HStack(spacing: 6) {
+                                    Button(action: {
+                                        if let s = NSPasteboard.general.string(forType: .string) {
+                                            sessionKeyInput = s
+                                        }
+                                    }) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "doc.on.clipboard")
+                                            Text("Paste")
+                                        }
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(Color.white.opacity(0.7))
+                                        .padding(.horizontal, 10).padding(.vertical, 6)
+                                        .background(Color.cardBg)
+                                        .cornerRadius(6)
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Button(action: { store.applyManualSession(sessionKeyInput) }) {
+                                        Group {
+                                            if store.isImporting {
+                                                ProgressView().scaleEffect(0.45).tint(Color.accent)
+                                            } else {
+                                                Text("Apply").font(.system(size: 11, weight: .semibold))
+                                            }
+                                        }
+                                        .foregroundStyle(Color.accent)
+                                        .padding(.horizontal, 14).padding(.vertical, 6)
+                                        .background(Color.accent.opacity(0.12))
+                                        .cornerRadius(6)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(store.isImporting)
+
+                                    Spacer()
+                                }
+
+                                if let status = store.importStatus {
+                                    Text(status)
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundStyle(status.contains("✓") ? Color.haikuGreen : Color.white.opacity(0.45))
                                 }
                             }
 

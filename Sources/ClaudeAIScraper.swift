@@ -37,9 +37,9 @@ enum ResetTimeParser {
         return total > 0 ? relativeTo.addingTimeInterval(total) : nil
     }
 
-    /// Parse "Tue 4:59 AM" or "Mon 12:00 PM" → next occurrence of that weekday/time
+    /// Parse "Tue 4:59 AM", "Tuesday at 5:00 AM", "Mon 12:00 PM" → next occurrence of that weekday/time
     static func parseWeeklyReset(_ text: String, relativeTo: Date) -> Date? {
-        let pattern = #"(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2}):(\d{2})\s*(AM|PM)"#
+        let pattern = #"(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+(?:at\s+)?(\d{1,2}):(\d{2})\s*(AM|PM)"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
         let ns = text as NSString
         guard let m = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
@@ -170,6 +170,26 @@ enum ClaudeAIAuth {
         }
     }
 
+    /// Inject a sessionKey copied from another browser (e.g. Chrome DevTools) so the
+    /// app reuses that login. Returns whether claude.ai is now considered signed in.
+    @MainActor
+    static func setSessionKey(_ value: String) async -> Bool {
+        let props: [HTTPCookiePropertyKey: Any] = [
+            .domain: ".claude.ai",
+            .path: "/",
+            .name: "sessionKey",
+            .value: value,
+            .secure: "TRUE",
+            .expires: Date().addingTimeInterval(365 * 24 * 3600),
+        ]
+        guard let cookie = HTTPCookie(properties: props) else { return false }
+        let store = WKWebsiteDataStore.default().httpCookieStore
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            store.setCookie(cookie) { cont.resume() }
+        }
+        return await checkLoggedIn()
+    }
+
     @MainActor
     static func signOut() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -270,21 +290,47 @@ final class ClaudeAIScraper: NSObject, WKNavigationDelegate {
     private static let extractionScript = """
     (function() {
         var out = {};
-        var text = document.body.innerText || "";
-        var pcts = [];
-        var re = /(\\d+(?:\\.\\d+)?)\\s*%/g;
-        var m;
-        while ((m = re.exec(text)) !== null) {
-            pcts.push(parseFloat(m[1]));
-        }
-        if (pcts.length >= 1) out.sessionPct = pcts[0];
-        if (pcts.length >= 2) out.weeklyPct  = pcts[1];
+        // Normalize non-breaking spaces so regexes match reliably.
+        var text = (document.body.innerText || "").replace(/\\u00a0/g, " ");
 
+        // --- Percentages: match each value to its labelled section, ---
+        // --- then fall back to positional order (session first, weekly second). ---
+        function pctNear(labelRe) {
+            var idx = text.search(labelRe);
+            if (idx < 0) return null;
+            var m = text.slice(idx, idx + 220).match(/(\\d+(?:\\.\\d+)?)\\s*%/);
+            return m ? parseFloat(m[1]) : null;
+        }
+
+        var sessionPct = pctNear(/current\\s+session/i);
+        var weeklyPct  = pctNear(/all\\s+models/i);
+        if (weeklyPct === null) weeklyPct = pctNear(/weekly/i);
+
+        if (sessionPct === null || weeklyPct === null) {
+            var pcts = [], re = /(\\d+(?:\\.\\d+)?)\\s*%/g, m;
+            while ((m = re.exec(text)) !== null) pcts.push(parseFloat(m[1]));
+            if (sessionPct === null && pcts.length >= 1) sessionPct = pcts[0];
+            if (weeklyPct  === null && pcts.length >= 2) weeklyPct  = pcts[1];
+        }
+        if (sessionPct !== null) out.sessionPct = sessionPct;
+        if (weeklyPct  !== null) out.weeklyPct  = weeklyPct;
+
+        // --- Session reset: relative, e.g. "resets in 57 min" ---
         var sessReset = text.match(/resets?\\s+in\\s+([^\\n.,;]+?)(?=[\\n.,;]|$)/i);
         if (sessReset) out.sessionReset = sessReset[1].trim();
 
-        var weekReset = text.match(/(?:All\\s+models|Weekly)[^\\n]{0,100}?resets?\\s+([A-Z][a-z]{2})\\s+([\\d:]+\\s*[AaPp]\\.?[Mm]\\.?)/);
-        if (weekReset) out.weeklyReset = weekReset[1] + " " + weekReset[2];
+        // --- Weekly reset: absolute day + time, e.g. "Resets Tue 5:00 AM" / ---
+        // --- "Resets Tuesday at 5:00 AM". Search the weekly section first, ---
+        // --- crossing newlines since label and time are separate DOM nodes. ---
+        var dayTime = /(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\\s+(?:at\\s+)?(\\d{1,2}:\\d{2})\\s*([AaPp]\\.?[Mm]\\.?)/;
+        var wIdx = text.search(/all\\s+models/i);
+        if (wIdx < 0) wIdx = text.search(/weekly/i);
+        var scope = wIdx >= 0 ? text.slice(wIdx, wIdx + 320) : text;
+        var w = scope.match(dayTime) || text.match(dayTime);
+        if (w) {
+            out.weeklyReset = w[1].slice(0, 3) + " " + w[2] + " " +
+                              w[3].replace(/\\./g, "").toUpperCase();
+        }
 
         return JSON.stringify(out);
     })();
