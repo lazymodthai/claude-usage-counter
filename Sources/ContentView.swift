@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 import AppKit
 
 // MARK: - Theme
@@ -12,11 +11,19 @@ extension Color {
     static let opusBlue   = Color(red: 0.04, green: 0.52, blue: 1.0)
     static let sonnetCyan = Color(red: 0.20, green: 0.68, blue: 0.90)
     static let haikuGreen = Color(red: 0.19, green: 0.82, blue: 0.35)
+
+    static func tint(for id: ProviderID) -> Color {
+        switch id {
+        case .claude: return .accent
+        case .codex:  return .haikuGreen
+        case .gemini: return .opusBlue
+        }
+    }
 }
 
 // MARK: - Root
 struct ContentView: View {
-    @EnvironmentObject var store: UsageStore
+    @EnvironmentObject var store: ProviderStore
 
     var body: some View {
         ZStack {
@@ -24,37 +31,41 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 HeaderRow()
                 Rectangle().fill(Color.divider).frame(height: 1)
-                UsageBarsSection()
+                ForEach(ProviderID.allCases) { id in
+                    ProviderSection(providerID: id)
+                    Rectangle().fill(Color.divider).frame(height: 1)
+                }
+                FooterRow()
             }
         }
         .frame(width: 320)
+        .onAppear { store.refreshAll() }
     }
 }
 
 // MARK: - Header
 struct HeaderRow: View {
-    @EnvironmentObject var store: UsageStore
+    @EnvironmentObject var store: ProviderStore
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "bolt.fill")
+            Image(systemName: store.menubarSource.symbolName)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.accent)
-            Text("Claude Usage")
+                .foregroundStyle(Color.tint(for: store.menubarSource))
+            Text("AI Usage")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
-            LoginStatusBadge(isLoggedIn: store.isLoggedIn)
             Spacer()
             if store.isLoading {
                 ProgressView().scaleEffect(0.55).tint(Color.white.opacity(0.5))
             }
-            Button(action: { store.refresh(); store.runScrape() }) {
+            Button(action: { store.refreshAll() }) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 11))
                     .foregroundStyle(Color.white.opacity(0.5))
             }
             .buttonStyle(.plain)
-            Button(action: { store.refreshLoginStatus(); store.showSettings.toggle() }) {
+            Button(action: { store.showSettings.toggle() }) {
                 Image(systemName: "gearshape")
                     .font(.system(size: 11))
                     .foregroundStyle(Color.white.opacity(0.5))
@@ -69,183 +80,173 @@ struct HeaderRow: View {
     }
 }
 
-// MARK: - Usage Bars (main section, like claudeusagebar.com)
-struct UsageBarsSection: View {
-    @EnvironmentObject var store: UsageStore
+// MARK: - Provider Section
+struct ProviderSection: View {
+    @EnvironmentObject var store: ProviderStore
+    let providerID: ProviderID
+
+    private var authState: AuthState { store.authStates[providerID] ?? .signedOut }
+    private var isConnected: Bool { authState == .signedIn }
+    private var hasBars: Bool { isConnected || providerID == .claude }
+    private var isOnMenubar: Bool { store.menubarSource == providerID }
 
     var body: some View {
-        VStack(spacing: 16) {
-            UsageBarRow(
-                label: "Current Session",
-                icon: "clock.fill",
-                iconColor: .accent,
-                fraction: sessionFraction,
-                used: sessionUsedText,
-                limit: sessionLimitText,
-                resetLabel: sessionResetLabel,
-                isActive: sessionIsActive
-            )
+        VStack(alignment: .leading, spacing: 12) {
+            // Provider header row
+            HStack(spacing: 6) {
+                Image(systemName: providerID.symbolName)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.tint(for: providerID))
+                Text(providerID.displayName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                if providerID == .gemini && isConnected {
+                    Text("beta")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.4))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(3)
+                }
+                if providerID == .claude && store.claudeUsingLocal {
+                    Text("local estimate")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.4))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(3)
+                }
+                if authState == .expired {
+                    Text("session expired")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(Color.yellow.opacity(0.9))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.yellow.opacity(0.12))
+                        .cornerRadius(3)
+                }
+                Spacer()
+                if hasBars {
+                    MenubarToggle(providerID: providerID, isOn: isOnMenubar)
+                }
+                if !isConnected {
+                    Button(action: { store.presentLogin(providerID) }) {
+                        Text(authState == .expired ? "Re-sign in" : "Sign in")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Color.tint(for: providerID))
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Color.cardBg)
+                            .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
 
-            UsageBarRow(
-                label: "Weekly — All Models",
-                icon: "calendar",
-                iconColor: .sonnetCyan,
-                fraction: weeklyFraction,
-                used: weeklyUsedText,
-                limit: weeklyLimitText,
-                resetLabel: weeklyResetLabel,
-                isActive: true
-            )
+            if hasBars {
+                if let vm = store.sessionBar(for: providerID) {
+                    UsageBarRow(
+                        label: "Current Session", icon: "clock.fill",
+                        iconColor: Color.tint(for: providerID), vm: vm)
+                }
+                if let vm = store.weeklyBar(for: providerID) {
+                    UsageBarRow(
+                        label: "Weekly", icon: "calendar",
+                        iconColor: .sonnetCyan, vm: vm)
+                }
+            } else if authState == .signedOut {
+                Text("Not connected")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.white.opacity(0.35))
+            }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 16)
+        .padding(.vertical, 12)
+    }
+}
 
+// Small "menu bar" pill — filled when this provider drives the menu bar,
+// clickable to switch.
+struct MenubarToggle: View {
+    @EnvironmentObject var store: ProviderStore
+    let providerID: ProviderID
+    let isOn: Bool
+
+    var body: some View {
+        Button(action: { store.menubarSource = providerID }) {
+            HStack(spacing: 3) {
+                Image(systemName: isOn ? "menubar.arrow.up.rectangle" : "rectangle.dashed")
+                    .font(.system(size: 8))
+                Text("menu bar")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(isOn ? Color.tint(for: providerID) : Color.white.opacity(0.35))
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background((isOn ? Color.tint(for: providerID) : Color.white).opacity(0.08))
+            .cornerRadius(4)
+        }
+        .buttonStyle(.plain)
+        .disabled(isOn)
+        .help("Show \(providerID.displayName) on the menu bar")
+    }
+}
+
+// MARK: - Footer
+struct FooterRow: View {
+    @EnvironmentObject var store: ProviderStore
+
+    private var updatedAt: Date {
+        store.usages[store.menubarSource]?.fetchedAt ?? store.data.lastUpdated
+    }
+    private var isLive: Bool {
+        store.authStates[store.menubarSource] == .signedIn
+            && store.usages[store.menubarSource] != nil
+    }
+
+    var body: some View {
         HStack(spacing: 4) {
-            if usingScraped {
+            if isLive {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.system(size: 9))
                     .foregroundStyle(Color.haikuGreen)
-                Text("Live from claude.ai")
+                Text("Live · \(store.menubarSource.displayName)")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.haikuGreen.opacity(0.8))
                 Text("·")
                     .foregroundStyle(Color.white.opacity(0.3))
             }
-            Text("Updated \((store.scrapedUsage?.fetchedAt ?? store.data.lastUpdated).formatted(.dateTime.hour().minute().second()))")
+            Text("Updated \(updatedAt.formatted(.dateTime.hour().minute().second()))")
                 .font(.system(size: 10))
                 .foregroundStyle(Color.white.opacity(0.3))
             Spacer()
         }
         .padding(.horizontal, 14)
-        .padding(.bottom, 12)
-    }
-
-    // MARK: - Data source selection
-    private var usingScraped: Bool {
-        store.useClaudeAISource && (store.scrapedUsage?.isStale == false)
-    }
-
-    private var effectiveSessionLimit: Int {
-        store.sessionTokenLimit > 0 ? store.sessionTokenLimit : max(1, store.data.detectedSessionLimit)
-    }
-    private var effectiveWeeklyLimit: Int {
-        store.weeklyTokenLimit > 0 ? store.weeklyTokenLimit : max(1, store.data.detectedWeeklyLimit)
-    }
-
-    // MARK: - Session
-    private var sessionAtLimit: Bool {
-        if usingScraped { return store.scrapedUsage?.sessionAtLimit == true }
-        guard let block = store.data.currentBlock, block.isActive else { return false }
-        return Double(block.tokens) / Double(effectiveSessionLimit) >= 0.9999
-    }
-
-    private var sessionFraction: Double {
-        if usingScraped, let pct = store.scrapedUsage?.sessionPct {
-            return min(pct / 100.0, 1.0)
-        }
-        guard let block = store.data.currentBlock, block.isActive else { return 0 }
-        return min(Double(block.tokens) / Double(effectiveSessionLimit), 1.0)
-    }
-
-    private var sessionIsActive: Bool {
-        if usingScraped { return store.scrapedUsage?.sessionPct != nil }
-        return store.data.currentBlock?.isActive ?? false
-    }
-
-    private var sessionUsedText: String {
-        // When at limit, show countdown instead of percentage
-        if sessionAtLimit {
-            return store.currentSessionDisplay()
-        }
-        if usingScraped, let pct = store.scrapedUsage?.sessionPct {
-            return String(format: "%.1f%%", pct)
-        }
-        return store.data.currentBlock.map { store.formatTokens($0.tokens) } ?? "—"
-    }
-
-    private var sessionLimitText: String {
-        if sessionAtLimit { return "LIMIT REACHED" }
-        if usingScraped { return "100%" }
-        return store.formatTokens(effectiveSessionLimit) + " tokens"
-    }
-
-    private var sessionResetLabel: String {
-        if usingScraped, let text = store.scrapedUsage?.sessionResetText {
-            return "Resets in \(text)"
-        }
-        guard let block = store.data.currentBlock, block.isActive else { return "No active session" }
-        let remaining = block.timeUntilReset
-        let fmt = DateFormatter(); fmt.timeStyle = .short
-        if remaining < 60 { return "Resets in < 1m" }
-        return "Resets at \(fmt.string(from: block.resetTime)) (\(store.formatDuration(remaining)))"
-    }
-
-    // MARK: - Weekly
-    private var weeklyAtLimit: Bool {
-        if usingScraped { return store.scrapedUsage?.weeklyAtLimit == true }
-        return Double(store.data.weeklyBlock.tokens) / Double(effectiveWeeklyLimit) >= 0.9999
-    }
-
-    private var weeklyFraction: Double {
-        if usingScraped, let pct = store.scrapedUsage?.weeklyPct {
-            return min(pct / 100.0, 1.0)
-        }
-        return min(Double(store.data.weeklyBlock.tokens) / Double(effectiveWeeklyLimit), 1.0)
-    }
-
-    private var weeklyUsedText: String {
-        if usingScraped, let pct = store.scrapedUsage?.weeklyPct {
-            return String(format: "%.1f%%", pct)
-        }
-        if weeklyAtLimit { return "100.0%" }
-        return store.formatTokens(store.data.weeklyBlock.tokens)
-    }
-
-    private var weeklyLimitText: String {
-        if weeklyAtLimit { return "LIMIT REACHED" }
-        if usingScraped { return "100%" }
-        return store.formatTokens(effectiveWeeklyLimit) + " tokens"
-    }
-
-    private var weeklyResetLabel: String {
-        if usingScraped, let reset = store.scrapedUsage?.weeklyResetTime {
-            return "Resets \(store.formatResetClock(reset))"
-        }
-        if usingScraped, let text = store.scrapedUsage?.weeklyResetText, !text.isEmpty {
-            return "Resets \(text)"
-        }
-        let reset = Date().addingTimeInterval(store.data.weeklyBlock.timeUntilReset)
-        return "Resets \(store.formatResetClock(reset))"
+        .padding(.vertical, 10)
     }
 }
 
+// MARK: - Usage Bar Row
 struct UsageBarRow: View {
     let label: String
     let icon: String
     let iconColor: Color
-    let fraction: Double
-    let used: String
-    let limit: String
-    let resetLabel: String
-    let isActive: Bool
+    let vm: UsageBarVM
 
-    private var pct: Double { fraction * 100 }
+    private var pct: Double { vm.fraction * 100 }
     private var barColor: Color {
-        if fraction >= 1.0 { return .red }
-        if fraction >= 0.9 { return .orange }
-        if fraction >= 0.7 { return Color(red: 1, green: 0.75, blue: 0) }
+        if vm.fraction >= 1.0 { return .red }
+        if vm.fraction >= 0.9 { return .orange }
+        if vm.fraction >= 0.7 { return Color(red: 1, green: 0.75, blue: 0) }
         return .accent
     }
 
-    // If `used` already contains a %, just show "used" — otherwise show "used / limit tokens"
+    // If `usedText` already contains a %, just show it — otherwise "used / limit tokens"
     private var infoText: String {
-        if used.contains("%") { return "" }
-        return "\(used) / \(limit)"
+        if vm.usedText.contains("%") { return "" }
+        if vm.limitText.isEmpty { return vm.usedText }
+        return "\(vm.usedText) / \(vm.limitText)"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Label row
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 5) {
                 Image(systemName: icon)
                     .font(.system(size: 10, weight: .medium))
@@ -254,14 +255,13 @@ struct UsageBarRow: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.white.opacity(0.75))
                 Spacer()
-                if isActive && fraction > 0 {
+                if vm.isActive && vm.fraction > 0 {
                     Text(String(format: "%.2f%%", pct))
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundStyle(barColor)
                 }
             }
 
-            // Progress bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 4)
@@ -273,20 +273,19 @@ struct UsageBarRow: View {
                                 startPoint: .leading, endPoint: .trailing
                             )
                         )
-                        .frame(width: geo.size.width * min(1, max(0, fraction)))
-                        .animation(.easeOut(duration: 0.5), value: fraction)
+                        .frame(width: geo.size.width * min(1, max(0, vm.fraction)))
+                        .animation(.easeOut(duration: 0.5), value: vm.fraction)
                 }
             }
             .frame(height: 8)
             .cornerRadius(4)
 
-            // Token counts + reset
             HStack {
                 Text(infoText)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Color.white.opacity(0.35))
                 Spacer()
-                Text(resetLabel)
+                Text(vm.resetLabel)
                     .font(.system(size: 10))
                     .foregroundStyle(barColor.opacity(0.8))
             }
@@ -294,36 +293,14 @@ struct UsageBarRow: View {
     }
 }
 
-// MARK: - Login Status Badge
-struct LoginStatusBadge: View {
-    let isLoggedIn: Bool
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(isLoggedIn ? Color.haikuGreen : Color.white.opacity(0.3))
-                .frame(width: 6, height: 6)
-            Text(isLoggedIn ? "Signed in" : "Not signed in")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(isLoggedIn ? Color.haikuGreen : Color.white.opacity(0.35))
-        }
-        .padding(.horizontal, 6).padding(.vertical, 2)
-        .background(
-            (isLoggedIn ? Color.haikuGreen : Color.white).opacity(0.08)
-        )
-        .cornerRadius(4)
-    }
-}
-
 // MARK: - Settings
 struct SettingsView: View {
-    @EnvironmentObject var store: UsageStore
+    @EnvironmentObject var store: ProviderStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var sessionLimitText = ""
     @State private var weeklyLimitText = ""
     @State private var intervalText = ""
-    @State private var sessionKeyInput = ""
 
     private let proSessionLimit  = 8_800_000
     private let proWeeklyLimit   = 88_000_000
@@ -334,7 +311,6 @@ struct SettingsView: View {
         ZStack {
             Color.appBg.ignoresSafeArea()
             VStack(alignment: .leading, spacing: 0) {
-                // Header
                 HStack {
                     Text("Settings")
                         .font(.system(size: 13, weight: .semibold))
@@ -352,141 +328,60 @@ struct SettingsView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        // claude.ai live source (most accurate)
+                        // Accounts
                         VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Label("Data Source", systemImage: "antenna.radiowaves.left.and.right")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(Color.white.opacity(0.5))
-                                Spacer()
-                                LoginStatusBadge(isLoggedIn: store.isLoggedIn)
-                            }
+                            Label("Accounts", systemImage: "person.2")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.white.opacity(0.5))
 
-                            Toggle(isOn: $store.useClaudeAISource) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Use claude.ai live data")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(.white)
-                                    Text("Matches claude.ai/settings/usage exactly")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(Color.white.opacity(0.4))
-                                }
-                            }
-                            .toggleStyle(.switch)
-                            .controlSize(.small)
-                            .disabled(!store.isLoggedIn)
-                            .opacity(store.isLoggedIn ? 1.0 : 0.5)
-
-                            HStack(spacing: 6) {
-                                Button(action: {
-                                    store.openClaudeAILogin()
-                                    // Re-check status after a delay
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                        store.refreshLoginStatus()
-                                    }
-                                }) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: store.isLoggedIn ? "arrow.clockwise.circle" : "person.crop.circle.badge.plus")
-                                        Text(store.isLoggedIn ? "Re-authenticate" : "Sign in to claude.ai")
-                                    }
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(Color.accent)
-                                    .padding(.horizontal, 10).padding(.vertical, 6)
-                                    .background(Color.cardBg)
-                                    .cornerRadius(6)
-                                }
-                                .buttonStyle(.plain)
-
-                                if store.isLoggedIn {
-                                    Button(action: { store.signOutClaudeAI() }) {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                                            Text("Sign out")
-                                        }
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(Color.white.opacity(0.6))
-                                        .padding(.horizontal, 10).padding(.vertical, 6)
-                                        .background(Color.cardBg)
-                                        .cornerRadius(6)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("วาง sessionKey จาก Chrome — DevTools (⌥⌘I) → Application → Cookies → claude.ai → คัดลอกค่า sessionKey")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(Color.white.opacity(0.4))
-                                    .fixedSize(horizontal: false, vertical: true)
-
-                                TextField("sk-ant-sid01-…", text: $sessionKeyInput)
-                                    .textFieldStyle(.plain)
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(.white)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .padding(.horizontal, 8).padding(.vertical, 6)
-                                    .background(Color.cardBg)
-                                    .cornerRadius(6)
-
-                                HStack(spacing: 6) {
-                                    Button(action: {
-                                        if let s = NSPasteboard.general.string(forType: .string) {
-                                            sessionKeyInput = s
-                                        }
-                                    }) {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "doc.on.clipboard")
-                                            Text("Paste")
-                                        }
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(Color.white.opacity(0.7))
-                                        .padding(.horizontal, 10).padding(.vertical, 6)
-                                        .background(Color.cardBg)
-                                        .cornerRadius(6)
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    Button(action: { store.applyManualSession(sessionKeyInput) }) {
-                                        Group {
-                                            if store.isImporting {
-                                                ProgressView().scaleEffect(0.45).tint(Color.accent)
-                                            } else {
-                                                Text("Apply").font(.system(size: 11, weight: .semibold))
-                                            }
-                                        }
-                                        .foregroundStyle(Color.accent)
-                                        .padding(.horizontal, 14).padding(.vertical, 6)
-                                        .background(Color.accent.opacity(0.12))
-                                        .cornerRadius(6)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(store.isImporting)
-
-                                    Spacer()
-                                }
-
-                                if let status = store.importStatus {
-                                    Text(status)
-                                        .font(.system(size: 9, weight: .medium))
-                                        .foregroundStyle(status.contains("✓") ? Color.haikuGreen : Color.white.opacity(0.45))
-                                }
-                            }
-
-                            if let s = store.scrapedUsage {
-                                Text("Last scraped: \(s.fetchedAt.formatted(.dateTime.hour().minute().second()))")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(Color.white.opacity(0.3))
+                            ForEach(ProviderID.allCases) { id in
+                                ProviderAccountRow(providerID: id)
                             }
                         }
 
                         Rectangle().fill(Color.divider).frame(height: 1)
 
-                        // Plan presets
+                        // Menu bar source
                         VStack(alignment: .leading, spacing: 8) {
-                            Label("Plan Presets (local fallback)", systemImage: "sparkles")
+                            Label("Menu Bar Shows", systemImage: "menubar.rectangle")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(Color.white.opacity(0.5))
+
+                            Picker("", selection: $store.menubarSource) {
+                                ForEach(menubarChoices) { id in
+                                    Text(id.displayName).tag(id)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+
+                            Text("เลือกได้เฉพาะ provider ที่เชื่อมต่อแล้ว")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.white.opacity(0.35))
+                        }
+
+                        Rectangle().fill(Color.divider).frame(height: 1)
+
+                        // Refresh
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Refresh Interval", systemImage: "clock")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.white.opacity(0.5))
+                            SettingField(label: "Interval (seconds, min 30)", placeholder: "60", text: $intervalText)
+                        }
+
+                        Rectangle().fill(Color.divider).frame(height: 1)
+
+                        // Claude local fallback limits
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Claude Local Fallback", systemImage: "internaldrive")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.white.opacity(0.5))
+
+                            Text("ใช้เมื่อยังไม่ได้ login claude.ai — ประมาณจากไฟล์ Claude Code (0 = ตรวจอัตโนมัติ)")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.white.opacity(0.35))
+                                .fixedSize(horizontal: false, vertical: true)
 
                             HStack(spacing: 8) {
                                 PlanPresetButton(label: "Pro", sublabel: "8.8M / 88M") {
@@ -497,51 +392,104 @@ struct SettingsView: View {
                                     sessionLimitText = "\(maxSessionLimit)"
                                     weeklyLimitText  = "\(maxWeeklyLimit)"
                                 }
-                                PlanPresetButton(label: "Custom", sublabel: "manual") {
-                                    // do nothing, let user type
+                                PlanPresetButton(label: "Auto", sublabel: "detect") {
+                                    sessionLimitText = "0"
+                                    weeklyLimitText  = "0"
                                 }
                             }
-                        }
 
-                        Rectangle().fill(Color.divider).frame(height: 1)
-
-                        // Token limits
-                        VStack(alignment: .leading, spacing: 12) {
-                            Label("Token Limits", systemImage: "cpu")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.white.opacity(0.5))
-
-                            SettingField(label: "Session limit (5h block)", placeholder: "8800000", text: $sessionLimitText)
-                            SettingField(label: "Weekly limit", placeholder: "88000000", text: $weeklyLimitText)
-                        }
-
-                        Rectangle().fill(Color.divider).frame(height: 1)
-
-                        // Refresh
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("Refresh Interval", systemImage: "clock")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.white.opacity(0.5))
-                            SettingField(label: "Interval (seconds)", placeholder: "30", text: $intervalText)
+                            SettingField(label: "Session limit (5h block)", placeholder: "0", text: $sessionLimitText)
+                            SettingField(label: "Weekly limit", placeholder: "0", text: $weeklyLimitText)
                         }
                     }
                     .padding(14)
                 }
             }
         }
-        .frame(width: 280)
+        .frame(width: 280, height: 480)
         .onAppear {
             sessionLimitText = "\(store.sessionTokenLimit)"
             weeklyLimitText  = "\(store.weeklyTokenLimit)"
             intervalText     = String(Int(store.refreshInterval))
-            store.refreshLoginStatus()
         }
     }
 
+    private var menubarChoices: [ProviderID] {
+        var choices = store.connectedProviders
+        if choices.isEmpty { choices = [.claude] }
+        if !choices.contains(store.menubarSource) { choices.append(store.menubarSource) }
+        return choices
+    }
+
     private func applySettings() {
-        if let v = Int(sessionLimitText), v > 0 { store.sessionTokenLimit = v }
-        if let v = Int(weeklyLimitText),  v > 0 { store.weeklyTokenLimit  = v }
-        if let v = Double(intervalText),  v >= 10 { store.refreshInterval = v }
+        if let v = Int(sessionLimitText), v >= 0 { store.sessionTokenLimit = v }
+        if let v = Int(weeklyLimitText),  v >= 0 { store.weeklyTokenLimit  = v }
+        if let v = Double(intervalText),  v >= 30 { store.refreshInterval = v }
+    }
+}
+
+struct ProviderAccountRow: View {
+    @EnvironmentObject var store: ProviderStore
+    let providerID: ProviderID
+
+    private var authState: AuthState { store.authStates[providerID] ?? .signedOut }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: providerID.symbolName)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.tint(for: providerID))
+                .frame(width: 14)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(providerID.displayName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white)
+                Text(statusText)
+                    .font(.system(size: 9))
+                    .foregroundStyle(statusColor)
+            }
+            Spacer()
+            if authState == .signedIn {
+                Button(action: { store.signOut(providerID) }) {
+                    Text("Sign out")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color.cardBg)
+                        .cornerRadius(5)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button(action: { store.presentLogin(providerID) }) {
+                    Text(authState == .expired ? "Re-sign in" : "Sign in")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.tint(for: providerID))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color.cardBg)
+                        .cornerRadius(5)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(8)
+        .background(Color.white.opacity(0.03))
+        .cornerRadius(6)
+    }
+
+    private var statusText: String {
+        switch authState {
+        case .signedIn:  return "Connected"
+        case .expired:   return "Session expired"
+        case .signedOut: return "Not connected"
+        }
+    }
+
+    private var statusColor: Color {
+        switch authState {
+        case .signedIn:  return .haikuGreen
+        case .expired:   return .yellow
+        case .signedOut: return Color.white.opacity(0.35)
+        }
     }
 }
 

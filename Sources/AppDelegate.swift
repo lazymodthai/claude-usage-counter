@@ -4,21 +4,21 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
-    private var store: UsageStore!
+    private var store: ProviderStore!
     private var eventMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         setupEditMenu()
 
-        store = UsageStore()
+        store = ProviderStore()
 
         // Status bar item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         store.statusItem = statusItem
 
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: "Claude Usage")
+            button.image = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: "AI Usage")
             button.image?.size = NSSize(width: 14, height: 14)
             button.title = " —"
             button.action = #selector(togglePopover)
@@ -42,9 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.closePopover()
         }
 
-        // Start FSEvents watcher + initial load
-        store.startWatching()
-        store.refresh()
+        // Start watchers, auth checks, and the fetch scheduler
+        store.start()
     }
 
     // Accessory apps have no menu bar, so standard text shortcuts (Cmd+V/C/X/A) are
