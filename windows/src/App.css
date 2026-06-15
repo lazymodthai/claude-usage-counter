@@ -1,0 +1,351 @@
+/* ─── Reset ─── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ─── Overlay window ─── */
+.overlay {
+  width: 320px;
+  background: rgba(13, 13, 15, var(--overlay-opacity, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  overflow: hidden;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255,255,255,0.04);
+}
+
+/* ─── Header ─── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  cursor: grab;
+}
+.header:active { cursor: grabbing; }
+
+.header-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  pointer-events: none;
+}
+
+.provider-icon {
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* ─── Shared ─── */
+.spacer { flex: 1; }
+
+.divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+/* ─── Buttons ─── */
+.icon-btn {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.icon-btn:hover { color: rgba(255, 255, 255, 0.85); }
+
+/* ─── Spinner ─── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(255,255,255,0.15);
+  border-top-color: rgba(255,255,255,0.6);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ─── Provider Section ─── */
+.provider-section {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.provider-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.provider-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+}
+
+.badge {
+  font-size: 8px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.4);
+}
+.badge-yellow {
+  background: rgba(255, 214, 10, 0.12);
+  color: rgba(255, 214, 10, 0.9);
+}
+
+.sign-in-btn {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 8px;
+  background: rgba(28, 28, 30, 1);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.sign-in-btn:hover { opacity: 0.8; }
+
+.not-connected {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* ─── Tint colors ─── */
+.tint-claude { color: #ff9f0a; }
+.tint-codex  { color: #30d158; }
+.tint-gemini { color: #0a84ff; }
+
+/* ─── Usage Bar ─── */
+.usage-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.usage-bar-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.usage-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.usage-pct {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'Cascadia Code', 'SF Mono', 'Consolas', monospace;
+}
+
+.bar-track {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.usage-bar-bottom {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-family: 'Cascadia Code', 'SF Mono', 'Consolas', monospace;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* ─── Footer ─── */
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 14px;
+}
+
+.footer-text {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* ─── Compact view ─── */
+.compact-view {
+  width: 320px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  background: rgba(13, 13, 15, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  cursor: grab;
+}
+.compact-view:active { cursor: grabbing; }
+
+.compact-nums {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: 'Cascadia Code', 'SF Mono', 'Consolas', monospace;
+  pointer-events: none;
+}
+
+/* ─── Settings overlay ─── */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.settings-panel {
+  width: 280px;
+  background: rgb(13, 13, 15);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+}
+
+.settings-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  flex: 1;
+}
+
+.settings-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.setting-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.setting-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.setting-sub {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 2px;
+}
+
+/* Toggle */
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+.toggle input { display: none; }
+.toggle-track {
+  width: 36px;
+  height: 20px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 10px;
+  transition: background 0.2s;
+  position: relative;
+}
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.toggle input:checked + .toggle-track {
+  background: #ff9f0a;
+}
+.toggle input:checked + .toggle-track::after {
+  transform: translateX(16px);
+}
+
+/* Slider */
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #ff9f0a;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* Keyboard shortcut badge */
+kbd.kbd {
+  font-family: 'Cascadia Code', 'SF Mono', 'Consolas', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
