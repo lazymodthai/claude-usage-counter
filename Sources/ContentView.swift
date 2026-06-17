@@ -25,6 +25,11 @@ extension Color {
 // MARK: - Root
 struct ContentView: View {
     @EnvironmentObject var store: ProviderStore
+    let fixedHeight: CGFloat?
+
+    init(fixedHeight: CGFloat? = nil) {
+        self.fixedHeight = fixedHeight
+    }
 
     private var leftProviders: [ProviderID] {
         store.visibleProviderIDs.filter { $0 != .antigravity }
@@ -43,28 +48,110 @@ struct ContentView: View {
     private var contentWidth: CGFloat { usesTwoColumns ? 640 : 320 }
 
     var body: some View {
-        ZStack {
-            Color.appBg.ignoresSafeArea()
+        ZStack(alignment: .top) {
+            Color.appBg
             VStack(spacing: 0) {
                 HeaderRow()
                 Rectangle().fill(Color.divider).frame(height: 1)
-                if usesTwoColumns {
-                    HStack(alignment: .top, spacing: 0) {
-                        ProviderColumn(providerIDs: visibleColumns[0])
-                            .frame(width: 319)
-                        Rectangle().fill(Color.divider).frame(width: 1)
-                        ProviderColumn(providerIDs: visibleColumns[1])
-                            .frame(width: 320)
-                    }
+                if fixedHeight == nil {
+                    columns
                 } else {
-                    ProviderColumn(providerIDs: visibleColumns.first ?? [])
+                    ScrollView(.vertical) {
+                        columns
+                    }
+                    .scrollIndicators(.visible)
                 }
                 Rectangle().fill(Color.divider).frame(height: 1)
                 FooterRow()
             }
         }
         .frame(width: contentWidth)
+        .frame(height: fixedHeight, alignment: .top)
         .onAppear { store.refreshAll() }
+    }
+
+    @ViewBuilder
+    private var columns: some View {
+        if usesTwoColumns {
+            HStack(alignment: .top, spacing: 0) {
+                ProviderColumn(providerIDs: visibleColumns[0])
+                    .frame(width: 319)
+                Rectangle().fill(Color.divider).frame(width: 1)
+                ProviderColumn(providerIDs: visibleColumns[1])
+                    .frame(width: 320)
+            }
+        } else {
+            ProviderColumn(providerIDs: visibleColumns.first ?? [])
+        }
+    }
+}
+
+struct PopupWindowRootView: View {
+    let contentWidth: CGFloat
+    let contentHeight: CGFloat
+    let arrowX: CGFloat
+
+    private let arrowHeight: CGFloat = 10
+    private let cornerRadius: CGFloat = 16
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            PopupChromeShape(arrowX: arrowX, arrowHeight: arrowHeight, cornerRadius: cornerRadius)
+                .fill(Color.appBg)
+            PopupChromeShape(arrowX: arrowX, arrowHeight: arrowHeight, cornerRadius: cornerRadius)
+                .stroke(Color.white.opacity(0.25), lineWidth: 1)
+            ContentView(fixedHeight: contentHeight)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .offset(y: arrowHeight)
+        }
+        .frame(width: contentWidth, height: contentHeight + arrowHeight)
+        .background(Color.clear)
+    }
+}
+
+struct PopupChromeShape: Shape {
+    let arrowX: CGFloat
+    let arrowHeight: CGFloat
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let arrowHalfWidth: CGFloat = 10
+        let topY = rect.minY + arrowHeight
+        let bottomY = rect.maxY
+        let leftX = rect.minX
+        let rightX = rect.maxX
+        let arrowCenterX = min(
+            max(arrowX, leftX + cornerRadius + arrowHalfWidth),
+            rightX - cornerRadius - arrowHalfWidth
+        )
+
+        var path = Path()
+        path.move(to: CGPoint(x: leftX + cornerRadius, y: topY))
+        path.addLine(to: CGPoint(x: arrowCenterX - arrowHalfWidth, y: topY))
+        path.addLine(to: CGPoint(x: arrowCenterX, y: rect.minY))
+        path.addLine(to: CGPoint(x: arrowCenterX + arrowHalfWidth, y: topY))
+        path.addLine(to: CGPoint(x: rightX - cornerRadius, y: topY))
+        path.addQuadCurve(
+            to: CGPoint(x: rightX, y: topY + cornerRadius),
+            control: CGPoint(x: rightX, y: topY)
+        )
+        path.addLine(to: CGPoint(x: rightX, y: bottomY - cornerRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: rightX - cornerRadius, y: bottomY),
+            control: CGPoint(x: rightX, y: bottomY)
+        )
+        path.addLine(to: CGPoint(x: leftX + cornerRadius, y: bottomY))
+        path.addQuadCurve(
+            to: CGPoint(x: leftX, y: bottomY - cornerRadius),
+            control: CGPoint(x: leftX, y: bottomY)
+        )
+        path.addLine(to: CGPoint(x: leftX, y: topY + cornerRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: leftX + cornerRadius, y: topY),
+            control: CGPoint(x: leftX, y: topY)
+        )
+        path.closeSubpath()
+        return path
     }
 }
 
