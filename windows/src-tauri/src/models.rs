@@ -41,3 +41,19 @@ pub struct ClaudeLocalUsage {
     pub is_local: bool,
     pub fetched_at: String,
 }
+
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct AntigravityUsageRaw {
+    pub plan_name: Option<String>,
+    pub lanes: Vec<QuotaLaneRaw>,
+    pub fetched_at: String,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct QuotaLaneRaw {
+    pub id: String,
+    pub label: String,
+    pub group: Option<String>,
+    pub pct: f64,
+    pub reset_text: Option<String>,
+}

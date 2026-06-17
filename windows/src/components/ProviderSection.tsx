@@ -6,12 +6,7 @@ const TINT: Record<ProviderID, string> = {
   claude: '#ff9f0a',
   codex: '#30d158',
   gemini: '#0a84ff',
-}
-
-const SESSION_ICON_COLOR: Record<ProviderID, string> = {
-  claude: '#ff9f0a',
-  codex: '#30d158',
-  gemini: '#0a84ff',
+  antigravity: '#b07aff',
 }
 
 interface Props {
@@ -20,7 +15,7 @@ interface Props {
 
 export function ProviderSection({ providerID }: Props) {
   const provider = useStore(s => s.providers[providerID])
-  const { authState, sessionBar, weeklyBar, usingLocal } = provider
+  const { authState, sessionBar, weeklyBar, quotaLanes, usingLocal } = provider
   const isConnected = authState === 'signed_in'
   const hasBars = isConnected || providerID === 'claude'
   const tint = TINT[providerID]
@@ -58,13 +53,31 @@ export function ProviderSection({ providerID }: Props) {
       </div>
 
       {/* Usage bars */}
-      {hasBars ? (
+      {quotaLanes && quotaLanes.length > 0 ? (
+        <>
+          {quotaLanes.map(lane => (
+            <UsageBar
+              key={lane.id}
+              label={lane.label}
+              icon="⬡"
+              iconColor={tint}
+              vm={{
+                fraction: lane.pct / 100,
+                usedText: `${lane.pct.toFixed(0)}%`,
+                limitText: '',
+                resetLabel: lane.resetText || '',
+                isActive: true
+              }}
+            />
+          ))}
+        </>
+      ) : hasBars ? (
         <>
           {sessionBar && (
             <UsageBar
               label="Current Session"
               icon="🕐"
-              iconColor={SESSION_ICON_COLOR[providerID]}
+              iconColor={tint}
               vm={sessionBar}
             />
           )}

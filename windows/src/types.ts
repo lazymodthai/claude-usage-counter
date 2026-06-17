@@ -1,5 +1,13 @@
-export type ProviderID = 'claude' | 'codex' | 'gemini'
+export type ProviderID = 'claude' | 'codex' | 'gemini' | 'antigravity'
 export type AuthState = 'signed_in' | 'signed_out' | 'expired'
+
+export interface QuotaLane {
+  id: string
+  label: string
+  group: string | null
+  pct: number
+  resetText: string | null
+}
 
 export interface UsageBarVM {
   fraction: number
@@ -13,6 +21,7 @@ export interface ProviderState {
   authState: AuthState
   sessionBar: UsageBarVM | null
   weeklyBar: UsageBarVM | null
+  quotaLanes: QuotaLane[]
   fetchedAt: Date | null
   usingLocal: boolean
 }
@@ -26,18 +35,20 @@ export interface AppState {
   compact: boolean
 }
 
-export const ALL_PROVIDERS: ProviderID[] = ['claude', 'codex', 'gemini']
+export const ALL_PROVIDERS: ProviderID[] = ['claude', 'codex', 'gemini', 'antigravity']
 
 export const PROVIDER_LABELS: Record<ProviderID, string> = {
   claude: 'Claude',
   codex: 'Codex',
   gemini: 'Gemini',
+  antigravity: 'Antigravity',
 }
 
 export const PROVIDER_ICONS: Record<ProviderID, string> = {
   claude: '⚡',
   codex: '</>',
   gemini: '✦',
+  antigravity: '⬡',
 }
 
 // Rust response shape from get_claude_local_usage
@@ -53,4 +64,18 @@ export interface ClaudeLocalUsage {
   weekly_reset_secs: number
   is_local: boolean
   fetched_at: string
+}
+
+export interface AntigravityUsage {
+  plan_name: string | null
+  lanes: AntigravityLane[]
+  fetched_at: string
+}
+
+export interface AntigravityLane {
+  id: string
+  label: string
+  group: string | null
+  pct: number
+  reset_text: string | null
 }

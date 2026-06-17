@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow, PhysicalPosition, LogicalSize } from '@tauri-apps/api/window'
-import type { ProviderID, ProviderState, AppState, ClaudeLocalUsage } from './types'
+import type { ProviderID, ProviderState, AppState, ClaudeLocalUsage, AntigravityUsage } from './types'
+import { ALL_PROVIDERS } from './types'
 import { formatTokens, formatCountdown, formatResetLabel } from './utils'
 
 const FULL_HEIGHT = 500
@@ -9,6 +10,11 @@ const COMPACT_HEIGHT = 44
 
 interface Store extends AppState {
   showSettings: boolean
+  visibleProviders: ProviderID[]
+  sessionTokenLimit: number
+  weeklyTokenLimit: number
+  refreshInterval: number
+
   refreshAll: () => Promise<void>
   setMenubarSource: (id: ProviderID) => void
   setOpacity: (v: number) => void
@@ -17,12 +23,19 @@ interface Store extends AppState {
   setCompact: (v: boolean) => Promise<void>
   hideWindow: () => Promise<void>
   initWindow: () => Promise<void>
+
+  setVisibleProviders: (ids: ProviderID[]) => void
+  toggleProviderVisible: (id: ProviderID) => void
+  setSessionTokenLimit: (v: number) => void
+  setWeeklyTokenLimit: (v: number) => void
+  setRefreshInterval: (v: number) => void
 }
 
 const defaultProvider = (): ProviderState => ({
   authState: 'signed_out',
   sessionBar: null,
   weeklyBar: null,
+  quotaLanes: [],
   fetchedAt: null,
   usingLocal: false,
 })
@@ -32,6 +45,7 @@ function mapClaudeUsage(u: ClaudeLocalUsage): ProviderState {
     authState: 'signed_in',
     usingLocal: u.is_local,
     fetchedAt: new Date(u.fetched_at),
+    quotaLanes: [],
     sessionBar: {
       fraction: u.session_fraction,
       usedText: formatTokens(u.session_tokens),
@@ -56,6 +70,7 @@ export const useStore = create<Store>((set, get) => ({
     claude: defaultProvider(),
     codex: defaultProvider(),
     gemini: defaultProvider(),
+    antigravity: defaultProvider(),
   },
   menubarSource: 'claude',
   isLoading: false,
@@ -63,6 +78,17 @@ export const useStore = create<Store>((set, get) => ({
   alwaysOnTop: true,
   compact: false,
   showSettings: false,
+  visibleProviders: (() => {
+    try {
+      const stored = localStorage.getItem('visibleProviders')
+      return stored ? JSON.parse(stored) : ALL_PROVIDERS
+    } catch {
+      return ALL_PROVIDERS
+    }
+  })(),
+  sessionTokenLimit: Number(localStorage.getItem('sessionTokenLimit')) || 0,
+  weeklyTokenLimit: Number(localStorage.getItem('weeklyTokenLimit')) || 0,
+  refreshInterval: Number(localStorage.getItem('refreshInterval')) || 60,
 
   refreshAll: async () => {
     set({ isLoading: true })
@@ -73,9 +99,90 @@ export const useStore = create<Store>((set, get) => ({
       }))
     } catch (e) {
       console.error('Claude local usage error:', e)
+    }
+
+    try {
+      const antiUsage = await invoke<AntigravityUsage | null>('get_antigravity_usage')
+      if (antiUsage) {
+        set(state => ({
+          providers: {
+            ...state.providers,
+            antigravity: {
+              authState: 'signed_in',
+              sessionBar: null,
+              weeklyBar: null,
+              quotaLanes: antiUsage.lanes.map(l => ({
+                id: l.id,
+                label: l.label,
+                group: l.group,
+                pct: l.pct,
+                resetText: l.reset_text,
+              })),
+              fetchedAt: new Date(antiUsage.fetched_at),
+              usingLocal: true,
+            }
+          }
+        }))
+      } else {
+        set(state => ({
+          providers: {
+            ...state.providers,
+            antigravity: {
+              ...state.providers.antigravity,
+              authState: 'signed_out',
+            }
+          }
+        }))
+      }
+    } catch (e) {
+      console.error('Antigravity usage error:', e)
     } finally {
       set({ isLoading: false })
+
+      // Update tray title
+      const state = get()
+      const provider = state.providers[state.menubarSource]
+      const fraction = provider.sessionBar?.fraction ?? 0
+      const pct = Math.round(fraction * 100)
+      try {
+        await invoke('update_tray_title', { title: `AI Usage — ${pct}%` })
+      } catch (e) {
+        // ignore
+      }
     }
+  },
+
+  setVisibleProviders: (ids) => {
+    if (ids.length === 0) return
+    set({ visibleProviders: ids })
+    localStorage.setItem('visibleProviders', JSON.stringify(ids))
+  },
+  toggleProviderVisible: (id) => {
+    const current = get().visibleProviders
+    if (current.includes(id)) {
+      if (current.length > 1) {
+        const next = current.filter(x => x !== id)
+        set({ visibleProviders: next })
+        localStorage.setItem('visibleProviders', JSON.stringify(next))
+      }
+    } else {
+      const next = [...current, id]
+      set({ visibleProviders: next })
+      localStorage.setItem('visibleProviders', JSON.stringify(next))
+    }
+  },
+  setSessionTokenLimit: (v) => {
+    set({ sessionTokenLimit: v })
+    localStorage.setItem('sessionTokenLimit', String(v))
+  },
+  setWeeklyTokenLimit: (v) => {
+    set({ weeklyTokenLimit: v })
+    localStorage.setItem('weeklyTokenLimit', String(v))
+  },
+  setRefreshInterval: (v) => {
+    const valid = Math.max(30, v)
+    set({ refreshInterval: valid })
+    localStorage.setItem('refreshInterval', String(valid))
   },
 
   setMenubarSource: id => set({ menubarSource: id }),

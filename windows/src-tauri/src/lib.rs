@@ -1,13 +1,26 @@
+mod antigravity_parser;
 mod claude_parser;
 mod models;
 mod tray;
 
-use models::ClaudeLocalUsage;
+use models::{ClaudeLocalUsage, AntigravityUsageRaw};
 use tauri::Manager;
 
 #[tauri::command]
 fn get_claude_local_usage() -> ClaudeLocalUsage {
     claude_parser::compute()
+}
+
+#[tauri::command]
+fn get_antigravity_usage() -> Option<AntigravityUsageRaw> {
+    antigravity_parser::compute()
+}
+
+#[tauri::command]
+fn update_tray_title(app: tauri::AppHandle, title: String) {
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some(&title));
+    }
 }
 
 #[tauri::command]
@@ -97,6 +110,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_claude_local_usage,
+            get_antigravity_usage,
+            update_tray_title,
             save_window_position,
             get_saved_position,
         ])

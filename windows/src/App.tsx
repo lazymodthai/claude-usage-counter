@@ -2,27 +2,39 @@ import { useEffect } from 'react'
 import { useStore } from './store'
 import { Header } from './components/Header'
 import { ProviderSection } from './components/ProviderSection'
+import { AntigravitySection } from './components/AntigravitySection'
 import { Footer } from './components/Footer'
 import { Settings } from './components/Settings'
 import { CompactView } from './components/CompactView'
-import { ALL_PROVIDERS } from './types'
+import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window'
 import './App.css'
-
-const REFRESH_INTERVAL_MS = 60_000
 
 export function App() {
   const opacity = useStore(s => s.opacity)
   const compact = useStore(s => s.compact)
   const showSettings = useStore(s => s.showSettings)
+  const visibleProviders = useStore(s => s.visibleProviders)
+  const refreshInterval = useStore(s => s.refreshInterval)
   const refreshAll = useStore(s => s.refreshAll)
   const initWindow = useStore(s => s.initWindow)
 
   useEffect(() => {
     initWindow()
     refreshAll()
-    const id = setInterval(refreshAll, REFRESH_INTERVAL_MS)
+    const id = setInterval(refreshAll, refreshInterval * 1000)
     return () => clearInterval(id)
-  }, [initWindow, refreshAll])
+  }, [initWindow, refreshAll, refreshInterval])
+
+  const hasAntigravity = visibleProviders.includes('antigravity')
+  const leftProviders = visibleProviders.filter(id => id !== 'antigravity')
+  const usesTwoColumns = hasAntigravity && leftProviders.length > 0
+
+  useEffect(() => {
+    if (!compact) {
+      const width = usesTwoColumns ? 640 : 320
+      getCurrentWindow().setSize(new LogicalSize(width, 500)).catch(() => {})
+    }
+  }, [usesTwoColumns, compact])
 
   if (compact) {
     return <CompactView />
@@ -31,19 +43,37 @@ export function App() {
   return (
     <>
       <div
-        className="overlay"
+        className={`overlay ${usesTwoColumns ? 'two-columns' : ''}`}
         style={{ '--overlay-opacity': opacity } as React.CSSProperties}
       >
-        <Header />
-        <div className="divider" />
-        {ALL_PROVIDERS.map((id, i) => (
-          <div key={id}>
-            <ProviderSection providerID={id} />
-            {i < ALL_PROVIDERS.length - 1 && <div className="divider" />}
+        <div className="layout-header">
+          <Header />
+          <div className="divider" />
+        </div>
+        
+        <div className="layout-body">
+          <div className="col-left">
+            {leftProviders.map((id, i) => (
+              <div key={id}>
+                <ProviderSection providerID={id} />
+                {i < leftProviders.length - 1 && <div className="divider" />}
+              </div>
+            ))}
           </div>
-        ))}
-        <div className="divider" />
-        <Footer />
+
+          {usesTwoColumns && <div className="col-divider" />}
+
+          {hasAntigravity && (
+            <div className="col-right">
+              <AntigravitySection />
+            </div>
+          )}
+        </div>
+
+        <div className="layout-footer">
+          <div className="divider" />
+          <Footer />
+        </div>
       </div>
 
       {showSettings && <Settings />}
