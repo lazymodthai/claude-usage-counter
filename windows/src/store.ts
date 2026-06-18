@@ -83,7 +83,7 @@ export const useStore = create<Store>((set, get) => ({
     gemini: defaultProvider(),
     antigravity: defaultProvider(),
   },
-  menubarSource: 'claude',
+  menubarSource: (localStorage.getItem('menubarSource') as ProviderID) || 'claude',
   isLoading: false,
   opacity: (() => {
     const v = Number(localStorage.getItem('idleOpacity'))
@@ -266,7 +266,10 @@ export const useStore = create<Store>((set, get) => ({
     localStorage.setItem('refreshInterval', String(valid))
   },
 
-  setMenubarSource: id => set({ menubarSource: id }),
+  setMenubarSource: id => {
+    set({ menubarSource: id })
+    localStorage.setItem('menubarSource', id)
+  },
 
   setOpacity: v => {
     set({ opacity: v })

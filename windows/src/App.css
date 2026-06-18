@@ -257,6 +257,25 @@ body {
 .compact-view:hover { opacity: 1; }
 .compact-view:active { cursor: grabbing; }
 
+.compact-provider {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  border-radius: 6px;
+  padding: 3px 7px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.compact-provider:hover { background: rgba(255, 255, 255, 0.12); }
+.compact-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+}
+
 .compact-nums {
   font-size: 13px;
   font-weight: 700;
