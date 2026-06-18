@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { ALL_PROVIDERS, PROVIDER_LABELS, PROVIDER_ICONS } from '../types'
+import { splitEmojis } from '../utils'
 
 const IS_MAC = navigator.platform.toLowerCase().includes('mac')
 const SHORTCUT_LABEL = IS_MAC ? '⌘⇧U' : 'Ctrl+Shift+U'
@@ -47,6 +48,8 @@ export function Settings() {
   const setSessionTokenLimit = useStore(s => s.setSessionTokenLimit)
   const setWeeklyTokenLimit = useStore(s => s.setWeeklyTokenLimit)
   const setRefreshInterval = useStore(s => s.setRefreshInterval)
+  const petIcon = useStore(s => s.petIcon)
+  const setPetIcon = useStore(s => s.setPetIcon)
 
   return (
     <div className="settings-overlay">
@@ -118,7 +121,7 @@ export function Settings() {
               <div className="setting-row">
                 <div>
                   <div className="setting-label">Always on Top</div>
-                  <div className="setting-sub">ลอยเหนือทุก window ตลอดเวลา</div>
+                  <div className="setting-sub">Keep the overlay above all other windows</div>
                 </div>
                 <label className="toggle">
                   <input
@@ -134,7 +137,7 @@ export function Settings() {
               <div className="setting-row">
                 <div>
                   <div className="setting-label">Auto-dim</div>
-                  <div className="setting-sub">จางลงเมื่อไม่ใช้ · ชัดเต็มเมื่อ hover</div>
+                  <div className="setting-sub">Fade when idle · full opacity on hover</div>
                 </div>
                 <label className="toggle">
                   <input
@@ -146,6 +149,58 @@ export function Settings() {
                 </label>
               </div>
 
+            </div>
+          </Section>
+
+          <div className="divider" />
+
+          {/* Walking Pet */}
+          <Section id="pet" title="🐾 Walking Pet" defaultOpen={false}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="setting-sub" style={{ marginTop: 0 }}>
+                Pick one or more (or type emojis) to walk along the header. Leave empty to turn off.
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {['🐈', '🐕', '🐧', '🐢', '🦆', '🐤', '🦖', '🐌', '🐝', '👾'].map(e => {
+                  const list = splitEmojis(petIcon)
+                  const active = list.includes(e)
+                  return (
+                    <button
+                      key={e}
+                      onClick={() => setPetIcon(active ? list.filter(x => x !== e).join('') : [...list, e].join(''))}
+                      title={active ? `Remove ${e}` : `Add ${e}`}
+                      style={{
+                        fontSize: 15,
+                        lineHeight: 1,
+                        padding: '4px 6px',
+                        borderRadius: 6,
+                        border: active ? '1px solid #00aaff' : '1px solid transparent',
+                        background: active ? 'rgba(0,170,255,0.15)' : 'rgba(255,255,255,0.06)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {e}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="setting-row" style={{ gap: 8 }}>
+                <input
+                  type="text"
+                  value={petIcon}
+                  onChange={e => setPetIcon(e.target.value)}
+                  placeholder="Type emoji(s)…"
+                  style={{ background: 'rgba(255,255,255,0.1)', color: 'white', border: 'none', borderRadius: 4, padding: '4px 8px', width: 110, fontSize: 14, textAlign: 'center' }}
+                />
+                {petIcon && (
+                  <button
+                    onClick={() => setPetIcon('')}
+                    style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.06)', border: 'none', borderRadius: 5, padding: '5px 10px', cursor: 'pointer' }}
+                  >
+                    Turn off
+                  </button>
+                )}
+              </div>
             </div>
           </Section>
 
@@ -173,7 +228,7 @@ export function Settings() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
               <kbd className="kbd">{SHORTCUT_LABEL}</kbd>
               <span className="setting-sub" style={{ margin: 0 }}>
-                ซ่อน / แสดง overlay
+                Hide / show overlay
               </span>
             </div>
           </div>

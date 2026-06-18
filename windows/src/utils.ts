@@ -13,6 +13,18 @@ export function startWindowDrag(e: MouseEvent): void {
   getCurrentWindow().startDragging().catch(() => {})
 }
 
+// Split a string into individual emoji/grapheme units so each can be rendered
+// as its own walking pet. Uses Intl.Segmenter (Chromium/WebView2) when present
+// so multi-codepoint emoji (ZWJ, skin tones) stay intact.
+export function splitEmojis(s: string): string[] {
+  const I = Intl as unknown as { Segmenter?: new (l?: string, o?: { granularity: string }) => { segment: (s: string) => Iterable<{ segment: string }> } }
+  if (typeof I.Segmenter === 'function') {
+    const seg = new I.Segmenter(undefined, { granularity: 'grapheme' })
+    return Array.from(seg.segment(s), (x) => x.segment).filter(g => g.trim() !== '')
+  }
+  return Array.from(s).filter(g => g.trim() !== '')
+}
+
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${Math.round(n / 1_000)}K`

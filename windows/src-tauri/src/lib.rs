@@ -366,7 +366,7 @@ fn show_first_launch_tip(app: AppHandle) {
         .notification()
         .builder()
         .title("AI Usage Counter")
-        .body("กำลังทำงานอยู่ใน System Tray  คลิกไอคอน ⚡ เพื่อแสดง/ซ่อน overlay\nหรือกด Ctrl+Shift+U")
+        .body("Running in the system tray. Click the ⚡ icon to show/hide the overlay,\nor press Ctrl+Shift+U.")
         .show();
 }
 
@@ -384,6 +384,15 @@ pub fn run() {
     let toggle_shortcut = Shortcut::new(Some(toggle_mod), Code::KeyU);
 
     tauri::Builder::default()
+        // Must be the first plugin: when a second launch happens, focus the
+        // existing window instead of spawning another tray instance.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
         .manage(AppState {
             claude: ProviderWorker::new(),
             codex: ProviderWorker::new(),

@@ -1,6 +1,18 @@
 export type ProviderID = 'claude' | 'codex' | 'gemini' | 'antigravity'
 export type AuthState = 'signed_in' | 'signed_out' | 'expired'
 
+// Which way the overlay grows when expanding from the compact pill.
+export type ExpandDir = 'down' | 'up' | 'left' | 'right'
+// User-facing setting: a fixed direction, or 'auto' (picked from screen position).
+export type ExpandSetting = ExpandDir | 'auto'
+export const EXPAND_DIR_ARROW: Record<ExpandDir, string> = {
+  down: '↓', up: '↑', left: '←', right: '→',
+}
+export const EXPAND_DIR_LABEL: Record<ExpandDir, string> = {
+  down: 'Expand downward', up: 'Expand upward',
+  left: 'Expand left', right: 'Expand right',
+}
+
 export interface QuotaLane {
   id: string
   label: string
@@ -48,7 +60,7 @@ export const PROVIDER_ICONS: Record<ProviderID, string> = {
   claude: '⚡',
   codex: '</>',
   gemini: '✦',
-  antigravity: '⬡',
+  antigravity: '★',
 }
 
 // Rust response shape from get_claude_usage / get_codex_usage / get_gemini_usage

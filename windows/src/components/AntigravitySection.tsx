@@ -5,7 +5,7 @@ import { PROVIDER_LABELS, PROVIDER_ICONS } from '../types'
 export function AntigravitySection() {
   const provider = useStore(s => s.providers.antigravity)
   const { authState, quotaLanes } = provider
-  const tint = '#b07aff'
+  const tint = '#00aaff'
 
   return (
     <div className="provider-section">
@@ -30,7 +30,7 @@ export function AntigravitySection() {
             <UsageBar
               key={lane.id}
               label={lane.label}
-              icon="⬡"
+              icon="★"
               iconColor={tint}
               vm={{
                 fraction: lane.pct / 100,

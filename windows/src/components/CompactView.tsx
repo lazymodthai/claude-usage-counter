@@ -1,12 +1,12 @@
 import { useStore } from '../store'
-import { PROVIDER_ICONS, PROVIDER_LABELS, type ProviderID, type ProviderState } from '../types'
+import { PROVIDER_ICONS, PROVIDER_LABELS, EXPAND_DIR_ARROW, EXPAND_DIR_LABEL, type ProviderID, type ProviderState } from '../types'
 import { startWindowDrag } from '../utils'
 
 const TINT: Record<ProviderID, string> = {
   claude: '#ff9f0a',
   codex: '#30d158',
   gemini: '#0a84ff',
-  antigravity: '#b07aff',
+  antigravity: '#00aaff',
 }
 
 // Derive a "current | weekly" pair for any provider shape:
@@ -41,6 +41,10 @@ export function CompactView() {
   const setMenubarSource = useStore(s => s.setMenubarSource)
   const setCompact = useStore(s => s.setCompact)
   const hideWindow = useStore(s => s.hideWindow)
+  const expandDirection = useStore(s => s.expandDirection)
+  const autoResolved = useStore(s => s.autoResolved)
+  const isAutoDir = expandDirection === 'auto'
+  const shownDir = expandDirection === 'auto' ? autoResolved : expandDirection
 
   const source = visibleProviders.includes(menubarSource) ? menubarSource : visibleProviders[0]
   const p = providers[source]
@@ -65,7 +69,7 @@ export function CompactView() {
       <button
         className="compact-provider"
         onClick={cycleProvider}
-        title="คลิกเพื่อสลับ provider"
+        title="Click to switch provider"
         style={{ color: tint }}
       >
         <span style={{ fontSize: 11 }}>{PROVIDER_ICONS[source]}</span>
@@ -78,7 +82,17 @@ export function CompactView() {
       </span>
       <div className="spacer" />
       {isLoading && <span className="spinner" style={{ width: 8, height: 8 }} />}
-      <button className="icon-btn" onClick={() => setCompact(false)} title="Expand (Ctrl+Shift+U)">⊡</button>
+      <button
+        className="icon-btn"
+        onClick={() => setCompact(false)}
+        title={isAutoDir
+          ? `Auto expand ${EXPAND_DIR_ARROW[shownDir]} (${EXPAND_DIR_LABEL[shownDir]})`
+          : `Expand ${EXPAND_DIR_LABEL[shownDir]}`}
+        style={{ color: isAutoDir ? '#00aaff' : undefined }}
+      >
+        {EXPAND_DIR_ARROW[shownDir]}
+        {isAutoDir && <sub style={{ fontSize: 7, marginLeft: -1 }}>A</sub>}
+      </button>
       <button className="icon-btn" onClick={hideWindow} title="Hide">×</button>
     </div>
   )

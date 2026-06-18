@@ -32,11 +32,29 @@ export function App() {
   const usesTwoColumns = hasAntigravity && leftProviders.length > 0
 
   useEffect(() => {
-    if (!compact) {
-      const width = usesTwoColumns ? 640 : 320
-      getCurrentWindow().setSize(new LogicalSize(width, 500)).catch(() => {})
+    if (compact) return
+    const win = getCurrentWindow()
+    // Honour a size the user has dragged to; otherwise fall back to the
+    // layout default (wider when the Antigravity column is shown).
+    const saved = localStorage.getItem('windowSize')
+    if (saved) {
+      try {
+        const { w, h } = JSON.parse(saved) as { w: number; h: number }
+        // Ignore stale/tiny saved sizes (e.g. a collapsed pill) so we never
+        // restore into something that looks "stuck".
+        if (w >= 280 && h >= 200) {
+          win.setSize(new LogicalSize(w, h)).catch(() => {})
+          return
+        }
+      } catch {}
     }
-  }, [usesTwoColumns, compact])
+    const width = usesTwoColumns ? 640 : 320
+    win.setSize(new LogicalSize(width, 500)).catch(() => {})
+    // Intentionally not depending on `compact`: collapse/expand sizing (and the
+    // grow-direction positioning) is owned by setCompact, so re-running here on
+    // a compact toggle would fight it. This only refits when columns change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usesTwoColumns])
 
   if (compact) {
     return <CompactView />

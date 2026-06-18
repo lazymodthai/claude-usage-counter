@@ -14,8 +14,12 @@ body {
 }
 
 /* ─── Overlay window ─── */
+/* Fills the OS window so dragging the window edges (resize) reflows the content. */
 .overlay {
-  width: 320px;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
   background: rgba(13, 13, 15, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 12px;
@@ -25,7 +29,7 @@ body {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255,255,255,0.04);
   /* Idle = faded so it doesn't block the view; brighten to full on hover. */
   opacity: var(--idle-opacity, 1);
-  transition: width 0.3s ease, opacity 0.25s ease;
+  transition: opacity 0.25s ease;
   cursor: grab;
 }
 .overlay:active { cursor: grabbing; }
@@ -38,26 +42,30 @@ body {
 .overlay label,
 .overlay .slider { cursor: pointer; }
 
-.overlay.two-columns {
-  width: 640px;
-}
+.layout-header,
+.layout-footer { flex-shrink: 0; }
 
 .layout-body {
   display: flex;
   flex-direction: row;
   width: 100%;
+  flex: 1;
+  min-height: 0;        /* allow children to scroll instead of overflowing */
+  overflow: hidden;
 }
 .col-left {
-  width: 320px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;     /* long content (e.g. many lanes) scrolls within column */
 }
 .col-right {
-  width: 319px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 .col-divider {
   width: 1px;
@@ -72,8 +80,54 @@ body {
   gap: 6px;
   padding: 10px 14px;
   cursor: grab;
+  position: relative;   /* anchor for the walking pet */
+  overflow: hidden;     /* keep the pet within the header band */
 }
 .header:active { cursor: grabbing; }
+
+/* ─── Walking pet ─── */
+/* Three nested layers so movement (left), facing (scaleX) and the walk bob
+   (translateY) each own a separate property and don't fight over `transform`. */
+.pet-walker {
+  position: absolute;
+  top: 50%;
+  margin-top: -9px;
+  font-size: 14px;
+  line-height: 1;
+  pointer-events: none;
+  opacity: 0.9;
+  /* Pauses built into the keyframes, so a steady linear timing reads best. */
+  animation: pet-walk 12s linear infinite;
+}
+@keyframes pet-walk {
+  /* idle at left, stroll right, idle (look around), stroll back, idle.
+     Right bound clears the button cluster (refresh/dir/collapse/settings/hide). */
+  0%, 8%    { left: 96px; }
+  44%, 56%  { left: calc(100% - 180px); }
+  92%, 100% { left: 96px; }
+}
+.pet-face {
+  display: inline-block;
+  animation: pet-face 12s steps(1, end) infinite;
+}
+@keyframes pet-face {
+  /* 🐈 faces left by default → flip while walking right. Turn during the
+     idle pauses (~50% and ~0/100%) so it looks like it stops, then turns. */
+  0%   { transform: scaleX(-1); }
+  50%  { transform: scaleX(1); }
+  100% { transform: scaleX(-1); }
+}
+.pet-bob {
+  display: inline-block;
+  animation: pet-bob 0.5s ease-in-out infinite;
+}
+@keyframes pet-bob {
+  /* two-step gait: a small dip on each footfall, with a slight lean */
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25%      { transform: translateY(-1.5px) rotate(-3deg); }
+  50%      { transform: translateY(0) rotate(0deg); }
+  75%      { transform: translateY(-1.5px) rotate(3deg); }
+}
 
 .header-title {
   font-size: 13px;
@@ -176,6 +230,7 @@ body {
 .tint-claude { color: #ff9f0a; }
 .tint-codex  { color: #30d158; }
 .tint-gemini { color: #0a84ff; }
+.tint-antigravity { color: #00aaff; }
 
 /* ─── Usage Bar ─── */
 .usage-bar-row {

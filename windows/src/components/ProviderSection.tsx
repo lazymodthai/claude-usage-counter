@@ -6,7 +6,7 @@ const TINT: Record<ProviderID, string> = {
   claude: '#ff9f0a',
   codex: '#30d158',
   gemini: '#0a84ff',
-  antigravity: '#b07aff',
+  antigravity: '#00aaff',
 }
 
 interface Props {

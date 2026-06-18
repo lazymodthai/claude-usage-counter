@@ -4,6 +4,24 @@ use regex::Regex;
 use chrono::Utc;
 use crate::models::{AntigravityUsageRaw, QuotaLaneRaw};
 
+// On Windows, spawning a console subprocess (wmic/netstat) pops a visible
+// console window for a split second. CREATE_NO_WINDOW suppresses it.
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[cfg(target_os = "windows")]
+fn hidden_command(program: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+    let mut cmd = Command::new(program);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+#[cfg(not(target_os = "windows"))]
+fn hidden_command(program: &str) -> Command {
+    Command::new(program)
+}
+
 #[derive(Debug)]
 struct ServerCandidate {
     pid: u32,
@@ -32,11 +50,11 @@ fn discover_servers() -> Vec<ServerCandidate> {
     let mut candidates = Vec::new();
 
     let output = if cfg!(target_os = "windows") {
-        Command::new("wmic")
+        hidden_command("wmic")
             .args(&["process", "get", "ProcessId,CommandLine", "/FORMAT:CSV"])
             .output()
     } else {
-        Command::new("ps")
+        hidden_command("ps")
             .args(&["ax", "-o", "pid=,command="])
             .output()
     };
@@ -99,7 +117,7 @@ fn listening_ports(pid: u32) -> Vec<u16> {
     let mut ports = Vec::new();
 
     if cfg!(target_os = "windows") {
-        if let Ok(output) = Command::new("netstat").args(&["-ano", "-p", "TCP"]).output() {
+        if let Ok(output) = hidden_command("netstat").args(&["-ano", "-p", "TCP"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 if line.contains("LISTENING") && line.contains(&format!(" {}", pid)) {
@@ -117,7 +135,7 @@ fn listening_ports(pid: u32) -> Vec<u16> {
         }
     } else {
         let pid_str = pid.to_string();
-        if let Ok(output) = Command::new("lsof").args(&["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-p", &pid_str]).output() {
+        if let Ok(output) = hidden_command("lsof").args(&["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-p", &pid_str]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 if line.contains("LISTEN") {

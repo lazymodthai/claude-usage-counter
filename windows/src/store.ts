@@ -2,12 +2,86 @@ import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow, PhysicalPosition, LogicalSize, currentMonitor } from '@tauri-apps/api/window'
-import type { ProviderID, ProviderState, AppState, AntigravityUsage, ProviderUsageResult } from './types'
+import type { ProviderID, ProviderState, AppState, AntigravityUsage, ProviderUsageResult, ExpandDir, ExpandSetting } from './types'
 import { ALL_PROVIDERS } from './types'
 import { formatCountdown, formatResetLabel } from './utils'
 
-const FULL_HEIGHT = 500
 const COMPACT_HEIGHT = 44
+
+// The full size the overlay expands to (validated saved size, or layout default).
+function targetFullSize(twoCol: boolean): { w: number; h: number } {
+  let w = twoCol ? 640 : 320
+  let h = 500
+  const saved = localStorage.getItem('windowSize')
+  if (saved) {
+    try {
+      const s = JSON.parse(saved) as { w: number; h: number }
+      if (s.w >= 280 && s.h >= 200) { w = s.w; h = s.h }
+    } catch {}
+  }
+  return { w, h }
+}
+
+// Pick the expand direction from where the window sits on its monitor: grow into
+// whichever edge has room (vertical preferred, since height grows the most).
+function computeAutoDir(
+  pos: { x: number; y: number },
+  size: { width: number; height: number },
+  mon: { position: { x: number; y: number }; size: { width: number; height: number }; scaleFactor: number },
+  fullWp: number,
+  fullHp: number,
+): ExpandDir {
+  const taskbar = Math.round(48 * (mon.scaleFactor || 1))
+  const needH = Math.max(0, fullHp - size.height)
+  const below = (mon.position.y + mon.size.height - taskbar) - (pos.y + size.height)
+  const above = pos.y - mon.position.y
+  if (below >= needH) return 'down'
+  if (above >= needH) return 'up'
+  const needW = Math.max(0, fullWp - size.width)
+  const right = (mon.position.x + mon.size.width) - (pos.x + size.width)
+  const left = pos.x - mon.position.x
+  if (needW > 0 && right >= needW) return 'right'
+  if (needW > 0 && left >= needW) return 'left'
+  return below >= above ? 'down' : 'up'
+}
+
+// Keep the window fully on its monitor (minus the taskbar) so an expand can
+// never push it off-screen beyond recovery.
+function clampToMonitor(
+  x: number, y: number, wp: number, hp: number,
+  mon: { position: { x: number; y: number }; size: { width: number; height: number }; scaleFactor: number },
+): WinPoint {
+  const taskbar = Math.round(48 * (mon.scaleFactor || 1))
+  const minX = mon.position.x
+  const minY = mon.position.y
+  const maxX = mon.position.x + mon.size.width - wp
+  const maxY = mon.position.y + mon.size.height - taskbar - hp
+  return {
+    x: Math.round(Math.max(minX, Math.min(x, maxX))),
+    y: Math.round(Math.max(minY, Math.min(y, maxY))),
+  }
+}
+
+// Compute the new top-left (physical px) so the window grows toward `dir`,
+// keeping the opposite edge pinned (and centering the perpendicular axis).
+type WinPoint = { x: number; y: number }
+function anchoredPos(
+  pos: WinPoint,
+  oldSize: { width: number; height: number },
+  newWp: number,
+  newHp: number,
+  dir: ExpandDir,
+): WinPoint {
+  const cx = pos.x + oldSize.width / 2
+  const cy = pos.y + oldSize.height / 2
+  switch (dir) {
+    case 'up':    return { x: Math.round(cx - newWp / 2), y: Math.round(pos.y + oldSize.height - newHp) }
+    case 'left':  return { x: Math.round(pos.x + oldSize.width - newWp), y: Math.round(cy - newHp / 2) }
+    case 'right': return { x: pos.x, y: Math.round(cy - newHp / 2) }
+    case 'down':
+    default:      return { x: Math.round(cx - newWp / 2), y: pos.y }
+  }
+}
 
 interface Store extends AppState {
   showSettings: boolean
@@ -16,6 +90,9 @@ interface Store extends AppState {
   weeklyTokenLimit: number
   refreshInterval: number
   autoDim: boolean
+  petIcon: string
+  expandDirection: ExpandSetting
+  autoResolved: ExpandDir
 
   refreshAll: () => Promise<void>
   loadProviderAuthStates: () => Promise<void>
@@ -35,6 +112,9 @@ interface Store extends AppState {
   setSessionTokenLimit: (v: number) => void
   setWeeklyTokenLimit: (v: number) => void
   setRefreshInterval: (v: number) => void
+  setPetIcon: (v: string) => void
+  cycleExpandDirection: () => void
+  refreshAutoDir: () => Promise<void>
 }
 
 const defaultProvider = (): ProviderState => ({
@@ -104,6 +184,10 @@ export const useStore = create<Store>((set, get) => ({
   sessionTokenLimit: Number(localStorage.getItem('sessionTokenLimit')) || 0,
   weeklyTokenLimit: Number(localStorage.getItem('weeklyTokenLimit')) || 0,
   refreshInterval: Number(localStorage.getItem('refreshInterval')) || 60,
+  // Off by default — user opts in by setting an emoji in Settings.
+  petIcon: localStorage.getItem('petIcon') ?? '',
+  expandDirection: (localStorage.getItem('expandDirection') as ExpandSetting) || 'auto',
+  autoResolved: 'down',
 
   loadProviderAuthStates: async () => {
     for (const provider of ['claude', 'codex', 'gemini'] as ProviderID[]) {
@@ -265,6 +349,36 @@ export const useStore = create<Store>((set, get) => ({
     set({ refreshInterval: valid })
     localStorage.setItem('refreshInterval', String(valid))
   },
+  setPetIcon: (v) => {
+    set({ petIcon: v })
+    localStorage.setItem('petIcon', v)
+  },
+  cycleExpandDirection: () => {
+    const order: ExpandSetting[] = ['auto', 'down', 'up', 'left', 'right']
+    const next = order[(order.indexOf(get().expandDirection) + 1) % order.length]
+    set({ expandDirection: next })
+    localStorage.setItem('expandDirection', next)
+    if (next === 'auto') get().refreshAutoDir()
+  },
+
+  // When in auto mode, recompute which way to grow from the current screen spot.
+  refreshAutoDir: async () => {
+    if (get().expandDirection !== 'auto') return
+    try {
+      const win = getCurrentWindow()
+      const sf = await win.scaleFactor()
+      const pos = await win.outerPosition()
+      const size = await win.outerSize()
+      const mon = await currentMonitor()
+      if (!mon) return
+      const twoCol =
+        get().visibleProviders.includes('antigravity') &&
+        get().visibleProviders.some(id => id !== 'antigravity')
+      const t = targetFullSize(twoCol)
+      const dir = computeAutoDir(pos, size, mon, Math.round(t.w * sf), Math.round(t.h * sf))
+      if (dir !== get().autoResolved) set({ autoResolved: dir })
+    } catch {}
+  },
 
   setMenubarSource: id => {
     set({ menubarSource: id })
@@ -289,11 +403,65 @@ export const useStore = create<Store>((set, get) => ({
   setShowSettings: v => set({ showSettings: v }),
 
   setCompact: async v => {
-    set({ compact: v })
+    const win = getCurrentWindow()
+    const setting = get().expandDirection
     try {
-      const height = v ? COMPACT_HEIGHT : FULL_HEIGHT
-      await getCurrentWindow().setSize(new LogicalSize(320, height))
-    } catch {}
+      const sf = await win.scaleFactor()
+      const pos = await win.outerPosition()
+      const oldSize = await win.outerSize()
+      const mon = await currentMonitor()
+
+      const twoCol =
+        get().visibleProviders.includes('antigravity') &&
+        get().visibleProviders.some(id => id !== 'antigravity')
+
+      let w: number
+      let h: number
+      if (v) {
+        // Collapse: remember the current full size first (ignore tiny values).
+        const cur = (await win.innerSize()).toLogical(sf)
+        if (cur.height > 120) {
+          localStorage.setItem('windowSize', JSON.stringify({ w: Math.round(cur.width), h: Math.round(cur.height) }))
+        }
+        w = 320
+        h = COMPACT_HEIGHT
+      } else {
+        // Expand to the saved full size (validated), or a sensible default.
+        const t = targetFullSize(twoCol)
+        w = t.w
+        h = t.h
+      }
+
+      const newWp = Math.round(w * sf)
+      const newHp = Math.round(h * sf)
+
+      // Resolve the grow direction. In auto: compute fresh from the screen
+      // position when expanding; reuse the last resolved value when collapsing
+      // so the pill returns to where it came from.
+      let dir: ExpandDir
+      if (setting === 'auto') {
+        if (v) {
+          dir = get().autoResolved
+        } else {
+          dir = mon ? computeAutoDir(pos, oldSize, mon, newWp, newHp) : 'down'
+          set({ autoResolved: dir })
+        }
+      } else {
+        dir = setting
+      }
+
+      // Pin the opposite edge so the window grows toward `dir`, then clamp to the
+      // monitor so it can never slip off-screen (recoverable in every case).
+      let np = anchoredPos(pos, oldSize, newWp, newHp, dir)
+      if (mon) np = clampToMonitor(np.x, np.y, newWp, newHp, mon)
+      set({ compact: v })
+      localStorage.setItem('compact', String(v))
+      await win.setSize(new LogicalSize(w, h))
+      await win.setPosition(new PhysicalPosition(np.x, np.y))
+    } catch {
+      set({ compact: v })
+      localStorage.setItem('compact', String(v))
+    }
   },
 
   hideWindow: async () => {
@@ -344,10 +512,46 @@ export const useStore = create<Store>((set, get) => ({
         await win.setSize(new LogicalSize(320, COMPACT_HEIGHT))
       }
 
-      // Save position whenever window moves
+      // Recover a window that ended up off-screen (e.g. a previously saved
+      // off-screen position): pull it back fully onto the monitor.
+      try {
+        const mon = await currentMonitor()
+        if (mon) {
+          const size = await win.outerSize()
+          const cur = await win.outerPosition()
+          const np = clampToMonitor(cur.x, cur.y, size.width, size.height, mon)
+          if (np.x !== cur.x || np.y !== cur.y) {
+            await win.setPosition(new PhysicalPosition(np.x, np.y))
+          }
+        }
+      } catch {}
+
+      // Save position whenever window moves, and (throttled) re-pick the auto
+      // grow direction so the arrow reflects where it'll expand from here.
+      let lastAutoTick = 0
       await win.listen('tauri://move', async () => {
         const pos = await win.outerPosition()
         localStorage.setItem('windowPos', JSON.stringify({ x: pos.x, y: pos.y }))
+        const now = Date.now()
+        if (now - lastAutoTick > 250) {
+          lastAutoTick = now
+          get().refreshAutoDir()
+        }
+      })
+
+      // Save size whenever the user resizes (ignore the compact pill and any
+      // transient tiny sizes so an expand can always restore a usable size).
+      await win.listen('tauri://resize', async () => {
+        if (get().compact) return
+        try {
+          const sf = await win.scaleFactor()
+          const size = (await win.innerSize()).toLogical(sf)
+          if (size.height < 120) return
+          localStorage.setItem('windowSize', JSON.stringify({
+            w: Math.round(size.width),
+            h: Math.round(size.height),
+          }))
+        } catch {}
       })
 
       // Listen for tray toggle-compact event
@@ -357,10 +561,14 @@ export const useStore = create<Store>((set, get) => ({
         localStorage.setItem('compact', String(next))
       })
 
-      // Listen for tray show event (restores from hide)
-      await win.listen('tauri://focus', () => {
-        // nothing needed — Tauri shows window automatically
-      })
+      // Keep the overlay above the taskbar and other windows. Windows can drop
+      // a topmost window behind the (also-topmost) taskbar when another app
+      // minimizes/restores, so re-assert topmost on focus and on a short timer.
+      const reassertTopmost = () => {
+        if (get().alwaysOnTop) win.setAlwaysOnTop(true).catch(() => {})
+      }
+      await win.listen('tauri://focus', reassertTopmost)
+      setInterval(reassertTopmost, 2000)
 
       // Refresh auth state when a provider login window closes
       await listen<string>('auth-state-changed', (event) => {
@@ -374,6 +582,9 @@ export const useStore = create<Store>((set, get) => ({
         // Immediately fetch usage for the newly logged-in provider
         useStore.getState().refreshAll()
       })
+
+      // Seed the auto grow-direction arrow from the restored position.
+      get().refreshAutoDir()
     } catch {}
   },
 }))

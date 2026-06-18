@@ -1,15 +1,18 @@
 use crate::models::{ProviderUsageResult, QuotaLaneRaw};
 use chrono::Utc;
 
-pub const START_URL: &str = "https://gemini.google.com/app";
+// hl=en asks Google to render the page in English regardless of the account's
+// locale, so the English label regexes below work for users in any country.
+// (Label matching also supports Thai as a fallback in case hl is ignored.)
+pub const START_URL: &str = "https://gemini.google.com/app?hl=en";
 
 // Tried in order — matches the macOS GeminiProvider fallback list.
 // The first entry equals START_URL (already loaded), the rest are navigated to.
 pub const USAGE_URLS: &[&str] = &[
-    "https://gemini.google.com/app",
-    "https://gemini.google.com/app/settings",
-    "https://gemini.google.com/app/settings/usage",
-    "https://gemini.google.com/app/usage",
+    "https://gemini.google.com/app?hl=en",
+    "https://gemini.google.com/app/settings?hl=en",
+    "https://gemini.google.com/app/settings/usage?hl=en",
+    "https://gemini.google.com/app/usage?hl=en",
 ];
 
 // JS that scrapes gemini.google.com's Usage Limits view.
@@ -28,7 +31,8 @@ pub const FETCH_JS: &str = r#"
         function pageText() { return (document.body.innerText || '').replace(/ /g, ' '); }
         function normalizePct(value, text) {
             const pct = parseFloat(value);
-            return /left|remain/i.test(text) ? Math.max(0, 100 - pct) : pct;
+            // "left"/"remain" (en) or "เหลือ" (th) means remaining → invert to used
+            return /left|remain|เหลือ/i.test(text) ? Math.max(0, 100 - pct) : pct;
         }
         function near(text, re) {
             const idx = text.search(re);
@@ -37,8 +41,8 @@ pub const FETCH_JS: &str = r#"
             const m = seg.match(/(\d+(?:\.\d+)?)\s*%/);
             if (!m) return null;
             const around = seg.slice(Math.max(0, m.index - 40), m.index + 40);
-            const out = { pct: parseFloat(m[1]), remaining: /left|remain/i.test(around) };
-            const rm = seg.match(/resets?[^\n.;]{0,80}/i);
+            const out = { pct: parseFloat(m[1]), remaining: /left|remain|เหลือ/i.test(around) };
+            const rm = seg.match(/(resets?|รีเซ็ต)[^\n;]{0,60}/i);
             if (rm) out.reset = rm[0];
             return out;
         }
@@ -76,9 +80,15 @@ pub const FETCH_JS: &str = r#"
         }
         function grab() {
             const text = pageText();
-            const session = near(text, /5[\s-]?hour|five[\s-]?hour|current\s+limit|current\s+usage|usage\s+limit/i);
-            const weekly = near(text, /week|weekly/i);
-            const lanes = quotaLanes(text);
+            // en labels + th labels: "การใช้งานปัจจุบัน" (current usage), "ขีดจำกัดรายสัปดาห์" (weekly limit)
+            // Anchor on the "Current usage" / "Weekly limit" rows (en) or their
+            // Thai labels. Avoid the bare page title "Usage limits".
+            const session = near(text, /5[\s-]?hour|five[\s-]?hour|current\s+(usage|limit)|ปัจจุบัน/i);
+            const weekly = near(text, /weekly|week\b|สัปดาห์/i);
+            // The simple usage page shows current+weekly bars; the per-model lane
+            // list is a different view. Prefer the bars when present so the page's
+            // description prose isn't mistaken for a model lane.
+            const lanes = (session || weekly) ? [] : quotaLanes(text);
             if (!session && !weekly && lanes.length === 0) return null;
             return { session, weekly, lanes };
         }
