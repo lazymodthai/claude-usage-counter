@@ -34,10 +34,8 @@ function Section({ id, title, defaultOpen = true, children }: SectionProps) {
 }
 
 export function Settings() {
-  const opacity = useStore(s => s.opacity)
   const autoDim = useStore(s => s.autoDim)
   const alwaysOnTop = useStore(s => s.alwaysOnTop)
-  const setOpacity = useStore(s => s.setOpacity)
   const setAutoDim = useStore(s => s.setAutoDim)
   const setAlwaysOnTop = useStore(s => s.setAlwaysOnTop)
   const setShowSettings = useStore(s => s.setShowSettings)
@@ -148,21 +146,6 @@ export function Settings() {
                 </label>
               </div>
 
-              {/* Idle opacity */}
-              <div className="setting-col" style={{ opacity: autoDim ? 1 : 0.4, pointerEvents: autoDim ? 'auto' : 'none' }}>
-                <div className="setting-label">
-                  ความจางตอนไม่ใช้ — {Math.round(opacity * 100)}%
-                </div>
-                <input
-                  type="range"
-                  min={0.15}
-                  max={1}
-                  step={0.05}
-                  value={opacity}
-                  onChange={e => setOpacity(parseFloat(e.target.value))}
-                  className="slider"
-                />
-              </div>
             </div>
           </Section>
 
