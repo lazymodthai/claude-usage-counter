@@ -1,8 +1,6 @@
-# Swift / SwiftPM
+# Swift build artifacts (macOS build run locally — never commit)
 .build/
 .swiftpm/
-Package.resolved
-*.xcodeproj
 
 # Build output
 build/
